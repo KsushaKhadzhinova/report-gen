@@ -10,9 +10,8 @@ def checks() -> list[tuple[str, bool, str]]:
     provider = get_provider()
     results: list[tuple[str, bool, str]] = []
 
-    needs_key = provider.name == "cloud" or provider.api_key is not None
-    key_ok = bool(provider.api_key) or not needs_key
-    hint = "" if key_ok else f"ключ не задан; получить: {provider.signup_url or 'у провайдера'}"
+    key_ok = bool(provider.api_key) or provider.api_key_env is None
+    hint = "" if key_ok else f"не задан {provider.api_key_env}; получить: {provider.signup_url or 'у провайдера'}"
     results.append((f"Провайдер «{provider.name}»: {provider.description}", key_ok, hint))
 
     results.append(("xelatex или Docker для PDF", bool(shutil.which("xelatex") or shutil.which("docker")), "установите Docker или TeX Live"))

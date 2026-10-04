@@ -56,17 +56,17 @@ def _save_env(key: str, value: str) -> None:
 def _setup_provider() -> None:
     provider = settings.get_provider()
     print(f"\nШаг 1. Языковая модель. Сейчас выбрано: «{provider.name}» ({provider.description}).")
-    if provider.name != "cloud" or provider.api_key:
+    if provider.api_key_env is None or provider.api_key:
         return
     print(
-        "Облачные модели бесплатны, но нужен ключ OpenRouter. Регистрация занимает минуту; "
+        f"Облачные модели бесплатны, но нужен ключ ({provider.api_key_env}). Регистрация занимает минуту; "
         "создайте ключ на странице, которая сейчас откроется."
     )
     if _ask("Открыть страницу ключей в браузере? [Д/н]", "д").lower().startswith("д"):
         webbrowser.open(provider.signup_url)
     key = _ask("Вставьте ключ (Enter, чтобы пропустить):")
     if key:
-        _save_env("OPENROUTER_API_KEY", key)
+        _save_env(provider.api_key_env, key)
         print("Ключ сохранён в файле .env рядом с программой.")
     else:
         print("Без ключа можно переключиться на локальную модель: report-gen use local")
