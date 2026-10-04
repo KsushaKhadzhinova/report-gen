@@ -1,0 +1,22 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+build/
+dist/
+
+.env
+workspace/
+projects/
+.reportgen/
+
+# Результаты сборки и промежуточные файлы
+**/output/
+*.aux
+*.log
+*.toc
+*.out
+*.synctex.gz
+
+# Личные материалы пользователя
+examples/*/screenshots/
