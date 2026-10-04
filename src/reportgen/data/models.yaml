@@ -1,0 +1,49 @@
+default_provider: cloud
+
+providers:
+  cloud:
+    description: OpenRouter, бесплатные модели
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY
+    signup_url: https://openrouter.ai/keys
+    roles:
+      writer:
+        - qwen/qwen3.8-27b:free
+        - google/gemma-4-31b-it:free
+        - openrouter/free
+      rewriter:
+        - google/gemma-4-31b-it:free
+        - qwen/qwen3.8-27b:free
+        - openrouter/free
+      reviewer:
+        - nvidia/nemotron-3-super-120b-a12b:free
+        - qwen/qwen3.8-27b:free
+        - openrouter/free
+      vision:
+        - google/gemma-4-31b-it:free
+        - qwen/qwen3.8-27b:free
+      utility:
+        - nvidia/nemotron-3-super-120b-a12b:free
+        - openrouter/free
+
+  local:
+    description: Ollama на этом компьютере
+    base_url: http://localhost:11434/v1
+    api_key_env: null
+    roles:
+      writer: [qwen2.5:7b]
+      rewriter: [qwen2.5:7b]
+      reviewer: [qwen2.5:7b]
+      vision: [qwen2.5vl:3b]
+      utility: [qwen2.5:3b]
+
+  custom:
+    description: Любой OpenAI-совместимый сервер, адрес в REPORTGEN_BASE_URL
+    base_url_env: REPORTGEN_BASE_URL
+    api_key_env: REPORTGEN_API_KEY
+    roles:
+      writer: [auto]
+      rewriter: [auto]
+      reviewer: [auto]
+      vision: [auto]
+      utility: [auto]
