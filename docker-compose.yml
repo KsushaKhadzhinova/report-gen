@@ -5,6 +5,9 @@ services:
     stdin_open: true
     tty: true
     working_dir: /work
+    user: "${REPORTGEN_UID:-1000}:${REPORTGEN_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./:/work
       - ${REPORTGEN_CODE_DIR:-./projects}:/code:ro
