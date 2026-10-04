@@ -21,3 +21,6 @@ projects/
 
 # Личные материалы пользователя
 examples/*/screenshots/
+
+# Передача контекста между сессиями
+HANDOVER.md
