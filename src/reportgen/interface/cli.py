@@ -13,6 +13,7 @@ from reportgen.application.check_report import check_overlap, lint_report
 from reportgen.application.fix_report import ReportFixer
 from reportgen.application.learn_style import learn_style
 from reportgen.application.write_report import WritingContext
+from reportgen.domain.personal import PersonalProfile
 from reportgen.domain.outline import structure_from_outline
 from reportgen.domain.structure import Structure
 from reportgen.infrastructure import settings
@@ -23,6 +24,7 @@ from reportgen.infrastructure.file_stores import FileStyleStore
 from reportgen.infrastructure.latex_compiler import LatexError, XelatexCompiler
 from reportgen.infrastructure.llm_client import LLMError, OpenAICompatibleModel
 from reportgen.infrastructure.outline_reader import read_outline
+from reportgen.infrastructure.profile_vault import EncryptedProfileVault, ProfileNotFound, WrongCredentials
 from reportgen.infrastructure.readers import DocumentProseSource, read_paragraphs
 from reportgen.infrastructure.scaffold import scaffold_project
 from reportgen.infrastructure.screen_capture import CaptureError, capture_project
@@ -111,6 +113,41 @@ def cmd_key(args) -> int:
     else:
         for provider, name in _key_names().items():
             print(f"{provider:8} {name:20} {'задан' if settings.get_provider(provider).api_key else 'не задан'}")
+    return EXIT_OK
+
+
+def _ask_credentials() -> tuple[str, str]:
+    email = input("Личная почта: ").strip()
+    passphrase = getpass.getpass("Парольная фраза (ввод скрыт): ")
+    return email, passphrase
+
+
+def _unlocked_profile(args) -> PersonalProfile | None:
+    """Личные данные расшифровываются только по явной просьбе и только на время сборки."""
+    if not getattr(args, "unlock", False):
+        return None
+    return EncryptedProfileVault().unlock(*_ask_credentials())
+
+
+def cmd_profile(args) -> int:
+    vault = EncryptedProfileVault()
+    if args.action == "set":
+        profile = PersonalProfile(
+            student=input("ФИО: ").strip(),
+            group=input("Группа: ").strip(),
+            supervisor=input("Руководитель: ").strip(),
+            email=input("Личная почта (нужна для разблокировки): ").strip(),
+        )
+        passphrase = getpass.getpass("Парольная фраза (не короче 8 символов): ")
+        if getpass.getpass("Повторите парольную фразу: ") != passphrase:
+            print("Фразы не совпали")
+            return EXIT_USAGE
+        vault.save(profile, passphrase)
+        print("Данные сохранены в зашифрованном виде. Для использования в документах добавляйте --unlock.")
+    else:
+        profile = vault.unlock(*_ask_credentials())
+        for label, value in (("ФИО", profile.student), ("Группа", profile.group), ("Руководитель", profile.supervisor), ("Почта", profile.email)):
+            print(f"{label}: {value}")
     return EXIT_OK
 
 
@@ -216,7 +253,8 @@ def cmd_fix(args) -> int:
 def cmd_build(args) -> int:
     formats = tuple(f.strip() for f in args.formats.split(","))
     repository = FileProjectRepository(Path(args.project))
-    for fmt, path in build_report(repository, container.renderers(), XelatexCompiler(), formats).items():
+    profile = _unlocked_profile(args)
+    for fmt, path in build_report(repository, container.renderers(), XelatexCompiler(), formats, profile).items():
         print(f"{fmt:5} {path}")
     return EXIT_OK
 
@@ -231,7 +269,7 @@ def cmd_make(args) -> int:
     print("Проверка:")
     cmd_lint(argparse.Namespace(docx=None, project=args.project))
     print("Сборка:")
-    return cmd_build(argparse.Namespace(project=args.project, formats=args.formats))
+    return cmd_build(argparse.Namespace(project=args.project, formats=args.formats, unlock=args.unlock))
 
 
 def _add_work_options(parser: argparse.ArgumentParser) -> None:
@@ -261,6 +299,8 @@ def build_parser() -> argparse.ArgumentParser:
     key = add("key", cmd_key, "Ключи доступа: хранятся зашифрованными в хранилище системы")
     key.add_argument("action", choices=["import-env", "set", "status", "delete"])
     key.add_argument("provider", nargs="?")
+    profile = add("profile", cmd_profile, "Личные данные для титульного листа: хранятся зашифрованными")
+    profile.add_argument("action", choices=["set", "show"])
     init = add("init", cmd_init, "Создать папку работы")
     init.add_argument("directory")
     init.add_argument("--type", choices=["coursework", "lab"], default="coursework")
@@ -292,9 +332,11 @@ def build_parser() -> argparse.ArgumentParser:
     build = add("build", cmd_build, "Собрать DOCX, TEX и PDF")
     build.add_argument("project")
     build.add_argument("--formats", default=",".join(ALL_FORMATS))
+    build.add_argument("--unlock", action="store_true", help="подставить личные данные из зашифрованного профиля")
     make = add("make", cmd_make, "Скриншоты, текст, проверка и сборка за один запуск")
     _add_work_options(make)
     make.add_argument("--formats", default=",".join(ALL_FORMATS))
+    make.add_argument("--unlock", action="store_true", help="подставить личные данные из зашифрованного профиля")
     return root
 
 
@@ -316,6 +358,6 @@ def main(argv: list[str] | None = None) -> int:
         onboarding.run()
     try:
         return args.handler(args)
-    except (LLMError, LatexError, CaptureError, EmptyReportError, FileNotFoundError, ValueError, SecretStoreUnavailable) as error:
+    except (LLMError, LatexError, CaptureError, EmptyReportError, FileNotFoundError, ValueError, SecretStoreUnavailable, WrongCredentials, ProfileNotFound) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         return EXIT_PROBLEMS

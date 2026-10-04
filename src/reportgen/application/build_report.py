@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Mapping
 
 from reportgen.application.ports import DocumentRenderer, PdfCompiler, ProjectRepository
+from reportgen.domain.personal import PersonalProfile, with_personal_data
 
 ALL_FORMATS = ("docx", "tex", "pdf")
 OUTPUT_DIR = "output"
@@ -18,11 +19,12 @@ def build_report(
     renderers: Mapping[str, DocumentRenderer],
     pdf_compiler: PdfCompiler,
     formats: tuple[str, ...] = ALL_FORMATS,
+    profile: PersonalProfile | None = None,
 ) -> dict[str, Path]:
     blocks = repository.load_blocks()
     if not blocks:
         raise EmptyReportError("В работе нет разделов: сначала выполните «write» или добавьте файлы в content/")
-    meta = repository.read_meta()
+    meta = with_personal_data(repository.read_meta(), profile)
     output_dir = repository.root / OUTPUT_DIR
     results: dict[str, Path] = {}
 
