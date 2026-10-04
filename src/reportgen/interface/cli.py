@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import sys
 from pathlib import Path
 
@@ -25,6 +26,7 @@ from reportgen.infrastructure.outline_reader import read_outline
 from reportgen.infrastructure.readers import DocumentProseSource, read_paragraphs
 from reportgen.infrastructure.scaffold import scaffold_project
 from reportgen.infrastructure.screen_capture import CaptureError, capture_project
+from reportgen.infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailable, migrate_env_file
 from reportgen.infrastructure.settings import read_data
 from reportgen.interface import container, doctor, onboarding
 
@@ -79,6 +81,36 @@ def cmd_models(args) -> int:
 def cmd_use(args) -> int:
     settings.set_default_provider(args.provider)
     print(f"Провайдер по умолчанию: {args.provider}")
+    return EXIT_OK
+
+
+def _key_names() -> dict[str, str]:
+    """Имена переменных ключей по провайдерам, у которых ключ вообще нужен."""
+    providers = settings.load_models_config()["providers"]
+    return {name: raw["api_key_env"] for name, raw in providers.items() if raw.get("api_key_env")}
+
+
+def cmd_key(args) -> int:
+    store = KeyringSecretStore()
+    if args.action == "import-env":
+        names = migrate_env_file(Path.cwd() / settings.ENV_FILE, store)
+        print("Перенесено в защищённое хранилище: " + (", ".join(names) if names else "ничего") + ". Значения в .env очищены.")
+    elif args.action == "set":
+        name = settings.get_provider(args.provider).api_key_env
+        if not name:
+            print("Этому провайдеру ключ не нужен")
+            return EXIT_USAGE
+        value = getpass.getpass(f"Ключ {name} (ввод скрыт): ").strip()
+        if not value:
+            return EXIT_USAGE
+        store.set(name, value)
+        print(f"Ключ {name} сохранён в защищённом хранилище.")
+    elif args.action == "delete":
+        store.delete(settings.get_provider(args.provider).api_key_env)
+        print("Ключ удалён из хранилища.")
+    else:
+        for provider, name in _key_names().items():
+            print(f"{provider:8} {name:20} {'задан' if settings.get_provider(provider).api_key else 'не задан'}")
     return EXIT_OK
 
 
@@ -226,6 +258,9 @@ def build_parser() -> argparse.ArgumentParser:
     models.add_argument("--provider")
     models.add_argument("--check", action="store_true", help="проверить доступность моделей")
     add("use", cmd_use, "Переключить провайдера: cloud, local или custom").add_argument("provider")
+    key = add("key", cmd_key, "Ключи доступа: хранятся зашифрованными в хранилище системы")
+    key.add_argument("action", choices=["import-env", "set", "status", "delete"])
+    key.add_argument("provider", nargs="?")
     init = add("init", cmd_init, "Создать папку работы")
     init.add_argument("directory")
     init.add_argument("--type", choices=["coursework", "lab"], default="coursework")
@@ -281,6 +316,6 @@ def main(argv: list[str] | None = None) -> int:
         onboarding.run()
     try:
         return args.handler(args)
-    except (LLMError, LatexError, CaptureError, EmptyReportError, FileNotFoundError, ValueError) as error:
+    except (LLMError, LatexError, CaptureError, EmptyReportError, FileNotFoundError, ValueError, SecretStoreUnavailable) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         return EXIT_PROBLEMS

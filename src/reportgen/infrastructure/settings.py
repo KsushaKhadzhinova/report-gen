@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
 import yaml
+
+from reportgen.infrastructure.secret_store import resolve_secret
 
 ENV_FILE = ".env"
 
@@ -39,7 +41,7 @@ class Provider:
     name: str
     description: str
     base_url: str
-    api_key: str | None
+    api_key: str | None = field(repr=False)
     api_key_env: str | None
     signup_url: str | None
     roles: dict[str, list[str]]
@@ -68,7 +70,7 @@ def get_provider(name: str | None = None) -> Provider:
         name=key,
         description=raw.get("description", ""),
         base_url=base_url.rstrip("/"),
-        api_key=os.environ.get(api_key_env) if api_key_env else None,
+        api_key=resolve_secret(api_key_env),
         api_key_env=api_key_env,
         signup_url=raw.get("signup_url"),
         roles=raw["roles"],

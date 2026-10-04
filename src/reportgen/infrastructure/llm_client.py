@@ -6,6 +6,7 @@ from pathlib import Path
 
 import requests
 
+from reportgen.domain.redaction import redact
 from reportgen.infrastructure.settings import Provider, get_provider
 
 RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
@@ -32,7 +33,7 @@ class OpenAICompatibleModel:
         return f"{self.provider.name}:{roles}"
 
     def complete(self, role: str, system: str, user: str, temperature: float = 0.6, max_tokens: int | None = None) -> str:
-        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        messages = [{"role": "system", "content": self._scrub(system)}, {"role": "user", "content": self._scrub(user)}]
         return self._complete(role, messages, temperature, max_tokens)
 
     def describe_image(self, image: Path, instruction: str) -> str:
@@ -52,7 +53,7 @@ class OpenAICompatibleModel:
                 self._request(models[0], [{"role": "user", "content": "Ответь одним словом: да"}], 0, 8)
                 results.append((role, models[0], True, "ok"))
             except LLMError as error:
-                results.append((role, models[0], False, str(error)[:120]))
+                results.append((role, models[0], False, self._scrub(str(error))[:120]))
         return results
 
     def _complete(self, role: str, messages: list[dict], temperature: float, max_tokens: int | None) -> str:
@@ -63,6 +64,9 @@ class OpenAICompatibleModel:
             except LLMError as error:
                 errors.append(str(error))
         raise LLMError(f"Все модели роли «{role}» недоступны:\n  " + "\n  ".join(errors))
+
+    def _scrub(self, value: str) -> str:
+        return redact(value, (self.provider.api_key,) if self.provider.api_key else ())
 
     def _candidates(self, role: str) -> list[str]:
         models = self.provider.roles.get(role) or self.provider.roles["utility"]
@@ -94,7 +98,7 @@ class OpenAICompatibleModel:
                 time.sleep(2**attempt * 2)
                 continue
             if response.status_code != 200:
-                raise LLMError(f"{model}: HTTP {response.status_code} {response.text[:200]}")
+                raise LLMError(f"{model}: HTTP {response.status_code} {self._scrub(response.text[:200])}")
             text = self._extract_text(response.json())
             if text:
                 return text
