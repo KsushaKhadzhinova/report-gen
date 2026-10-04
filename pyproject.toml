@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 capture = ["playwright>=1.45", "pyautogui>=0.9"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
 report-gen = "reportgen.interface.cli:main"
@@ -34,3 +34,7 @@ reportgen = ["data/*.yaml", "data/*.tex", "data/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py310"

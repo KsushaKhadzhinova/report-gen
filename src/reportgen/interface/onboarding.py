@@ -51,7 +51,7 @@ def _ask(question: str, default: str = "") -> str:
 def _save_env(key: str, value: str) -> None:
     env_path = Path.cwd() / settings.ENV_FILE
     lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.is_file() else []
-    lines = [l for l in lines if not l.startswith(f"{key}=")] + [f"{key}={value}"]
+    lines = [line for line in lines if not line.startswith(f"{key}=")] + [f"{key}={value}"]
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

@@ -1,4 +1,7 @@
-"""Блокирует коммит, если в него попали файлы .env или фрагменты, похожие на ключи доступа."""
+"""Блокирует коммит, если в него попали файлы .env или фрагменты, похожие на ключи доступа.
+
+Без аргументов проверяет добавленные в индекс изменения (pre-commit); с ключом --all проверяет все отслеживаемые файлы (CI).
+"""
 
 from __future__ import annotations
 
@@ -7,20 +10,28 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
 
 from reportgen.domain.redaction import find_tokens  # noqa: E402
 
 ALLOWED_ENV_FILES = {".env.example"}
+PERSONAL_FILES = {"profile.enc", "profile.yaml", "unlock.txt", "style_profile.json"}
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
 
 
-def staged(*args: str) -> str:
-    return subprocess.run(["git", "diff", "--cached", *args], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+def git(*args: str) -> str:
+    result = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=ROOT)
+    return result.stdout
 
 
 def forbidden_files(names: list[str]) -> list[str]:
-    return [n for n in names if Path(n).name.startswith(".env") and Path(n).name not in ALLOWED_ENV_FILES]
+    forbidden = []
+    for name in names:
+        base = Path(name).name
+        if (base.startswith(".env") and base not in ALLOWED_ENV_FILES) or base in PERSONAL_FILES:
+            forbidden.append(name)
+    return forbidden
 
 
 def leaked_locations(diff: str) -> list[str]:
@@ -39,16 +50,31 @@ def leaked_locations(diff: str) -> list[str]:
     return locations
 
 
+def tracked_locations() -> list[str]:
+    locations: list[str] = []
+    for name in git("ls-files").splitlines():
+        path = ROOT / name
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue
+        locations += [f"{name}:{number}" for number, line in enumerate(lines, 1) if find_tokens(line)]
+    return locations
+
+
 def main() -> int:
+    scan_all = "--all" in sys.argv[1:]
+    names = git("ls-files").splitlines() if scan_all else git("diff", "--cached", "--name-only").splitlines()
+    locations = tracked_locations() if scan_all else leaked_locations(git("diff", "--cached", "-U0"))
     problems = []
-    files = forbidden_files(staged("--name-only").splitlines())
-    if files:
-        problems.append("Файлы с секретами нельзя коммитить: " + ", ".join(files))
-    locations = leaked_locations(staged("-U0"))
+    if forbidden_files(names):
+        problems.append("Личные файлы и файлы с секретами нельзя коммитить: " + ", ".join(forbidden_files(names)))
     if locations:
         problems.append("Фрагмент, похожий на ключ доступа, найден здесь: " + ", ".join(locations))
     for problem in problems:
-        print(f"Коммит остановлен. {problem}", file=sys.stderr)
+        print(f"Проверка не пройдена. {problem}", file=sys.stderr)
     return 1 if problems else 0
 
 

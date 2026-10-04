@@ -13,6 +13,8 @@ from reportgen.domain.lint_rules import Issue
 
 MIN_BODY_PARAGRAPH_CHARS = 80
 MARGIN_TOLERANCE = Mm(1)
+TABLE_CAPTION_RE = re.compile(r"^Таблица\s+[\dА-Я]+(\.\d+)?\s*[–-]")
+NUMBERED_TITLE_RE = re.compile(r"^\d+(\.\d+)*\s")
 CAPTION_RE = re.compile(r"^(Рисунок|Таблица|Листинг)\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 INDENT_TOLERANCE = Cm(0.1)
 
@@ -36,6 +38,20 @@ def _has_foreign_font(paragraph) -> bool:
 def _has_wrong_indent(paragraph) -> bool:
     indent = paragraph.paragraph_format.first_line_indent
     return indent is None or abs(indent - Cm(stp.PARAGRAPH_INDENT_CM)) > INDENT_TOLERANCE
+
+
+def _is_heading(paragraph) -> bool:
+    return paragraph.style.name.startswith("Heading") and bool(paragraph.text.strip())
+
+
+def _heading_alignment_is_wrong(paragraph) -> bool:
+    centered_expected = paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None
+    expected = WD_ALIGN_PARAGRAPH.CENTER if centered_expected else WD_ALIGN_PARAGRAPH.LEFT
+    return paragraph.alignment != expected
+
+
+def _is_table_caption(paragraph) -> bool:
+    return TABLE_CAPTION_RE.match(paragraph.text.strip()) is not None
 
 
 def _margin_issues(document, name: str) -> list[Issue]:
@@ -87,6 +103,10 @@ class DocxFormatService:
             "абзацев с абзацным отступом не 1,25 см": sum(_has_wrong_indent(p) for p in body),
             "абзацев не по ширине": sum(p.alignment not in (None, WD_ALIGN_PARAGRAPH.JUSTIFY) for p in body),
         }
+        counts["заголовков с неверным выравниванием"] = sum(_heading_alignment_is_wrong(p) for p in document.paragraphs if _is_heading(p))
+        counts["подписей таблиц не по левому краю"] = sum(
+            p.alignment != WD_ALIGN_PARAGRAPH.LEFT for p in document.paragraphs if _is_table_caption(p)
+        )
         issues += [Issue("error", path.name, f"{count} {label}") for label, count in counts.items() if count]
         return issues
 
@@ -95,12 +115,38 @@ class DocxFormatService:
         self._fix_page(document)
         self._fix_normal_style(document)
         fixed = sum(self._fix_paragraph(p) for p in document.paragraphs)
+        fixed += sum(self._fix_heading(p) for p in document.paragraphs if _is_heading(p))
+        fixed += sum(self._fix_table_caption(p) for p in document.paragraphs if _is_table_caption(p))
         output.parent.mkdir(parents=True, exist_ok=True)
         document.save(str(output))
         return fixed
 
     def open_text(self, path: Path) -> _DocxText:
         return _DocxText(path)
+
+    @staticmethod
+    def _fix_heading(paragraph) -> int:
+        fmt = paragraph.paragraph_format
+        centered = paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if centered else WD_ALIGN_PARAGRAPH.LEFT
+        fmt.first_line_indent = None if centered else Cm(stp.PARAGRAPH_INDENT_CM)
+        fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        fmt.line_spacing = Pt(stp.LINE_SPACING_PT)
+        fmt.space_before = Pt(0)
+        fmt.space_after = Pt(stp.LINE_SPACING_PT)
+        fmt.keep_with_next = True
+        for run in paragraph.runs:
+            run.font.name = stp.FONT
+            run.font.size = Pt(stp.FONT_SIZE_PT)
+            run.font.bold = True
+        return 1
+
+    @staticmethod
+    def _fix_table_caption(paragraph) -> int:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.first_line_indent = Cm(0)
+        paragraph.paragraph_format.keep_with_next = True
+        return 1
 
     @staticmethod
     def _fix_page(document) -> None:

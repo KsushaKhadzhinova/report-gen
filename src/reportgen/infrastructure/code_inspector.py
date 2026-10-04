@@ -43,7 +43,10 @@ def analyze(root: Path, max_listing_files: int = 12) -> dict:
         if path.name in MANIFESTS:
             manifests.append(f"{relative} ({MANIFESTS[path.name]})")
             if path.name == "requirements.txt":
-                dependencies += [l.split("==")[0].split(">=")[0].strip() for l in path.read_text(errors="ignore").splitlines() if l.strip() and not l.startswith("#")]
+                requirement_lines = path.read_text(errors="ignore").splitlines()
+                dependencies += [
+                    line.split("==")[0].split(">=")[0].strip() for line in requirement_lines if line.strip() and not line.startswith("#")
+                ]
             elif path.name == "package.json":
                 try:
                     data = json.loads(path.read_text(errors="ignore"))
