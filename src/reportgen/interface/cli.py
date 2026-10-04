@@ -201,7 +201,7 @@ def cmd_overlap(args) -> int:
 def cmd_fix(args) -> int:
     source = Path(args.file)
     output = Path(args.output) if args.output else source.with_name(f"{source.stem}.fixed.docx")
-    library = container.reference_library(args.reference)
+    library = container.reference_library(args.reference) if args.reference else None
     remarks = Path(args.remarks).read_text(encoding="utf-8") if args.remarks else ""
     model = OpenAICompatibleModel() if (library or remarks) else None
     result = ReportFixer(DocxFormatService(), model, FileStyleStore(), library).fix(source, output, remarks)
