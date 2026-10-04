@@ -13,6 +13,7 @@ from PIL import Image
 
 from reportgen.domain import stp
 from reportgen.domain.blocks import Block, Kind
+from reportgen.infrastructure.safe_paths import resolve_inside
 
 INLINE_RE = re.compile(r"(`[^`]+`|\*[^*]+\*)")
 FIGURE_MAX_WIDTH_CM = 15.5
@@ -141,11 +142,11 @@ def _picture_width_cm(path: Path) -> float:
 
 
 def _figure(doc: Document, block: Block, base: Path) -> None:
-    path = (base / block.path).resolve()
+    path = resolve_inside(base, block.path)
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.keep_with_next = True
-    if path.is_file():
+    if path:
         paragraph.add_run().add_picture(str(path), width=Cm(_picture_width_cm(path)))
     else:
         paragraph.add_run(f"[нет файла: {block.path}]")

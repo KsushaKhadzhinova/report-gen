@@ -2,7 +2,9 @@ FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    REPORTGEN_HOME=/work/workspace
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    REPORTGEN_HOME=/work/workspace \
+    HOME=/home/app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -15,7 +17,6 @@ RUN apt-get update \
         fontconfig \
         graphviz \
         plantuml \
-        git \
     && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
@@ -24,8 +25,14 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install ".[capture]" \
     && playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright \
     && rm -rf /var/lib/apt/lists/*
 
+RUN useradd --create-home --uid 1000 app \
+    && mkdir -p /work \
+    && chown app:app /work
+USER app
 WORKDIR /work
+
 ENTRYPOINT ["report-gen"]
 CMD ["--help"]

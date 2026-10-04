@@ -6,6 +6,7 @@ from pathlib import Path
 
 from reportgen.domain import stp
 from reportgen.domain.blocks import Block, Kind
+from reportgen.infrastructure.safe_paths import resolve_inside
 
 SPECIAL = {
     "\\": r"\textbackslash{}",
@@ -144,8 +145,8 @@ def _table(block: Block) -> str:
 
 
 def _figure(block: Block, build_dir: Path, base: Path, counter: int) -> str:
-    source = (base / block.path).resolve()
-    if not source.is_file():
+    source = resolve_inside(base, block.path)
+    if source is None:
         return rf"\noindent\textit{{[нет файла: {escape(block.path)}]}}\par"
     target_dir = build_dir / "figures"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -160,15 +161,25 @@ def _figure(block: Block, build_dir: Path, base: Path, counter: int) -> str:
     )
 
 
-def _code(block: Block) -> str:
-    out = []
+NEWLINE = chr(10)
+NOINDENT = "\\noindent "
+PAR_NOBREAK = "\\par\\nopagebreak"
+SKIP_LINE = "\\vspace{\\baselineskip}"
+VERBATIM_INPUT = "\\VerbatimInput[fontsize=\\small,breaklines=true,breakanywhere=true]{listings/%s}"
+
+
+def _code(block: Block, build_dir: Path, counter: int) -> str:
+    listings = build_dir / "listings"
+    listings.mkdir(parents=True, exist_ok=True)
+    source = listings / f"listing{counter}.txt"
+    source.write_text(block.text, encoding="utf-8")
+    lines = []
     if block.caption:
-        out.append(r"\noindent " + escape(stp.listing_caption(block.number, block.caption)) + r"\par\nopagebreak")
-    out.append(r"\begin{Verbatim}[fontsize=\small,breaklines=true,breakanywhere=true]")
-    out.append(block.text)
-    out.append(r"\end{Verbatim}")
-    out.append(r"\vspace{\baselineskip}")
-    return "\n".join(out)
+        caption = escape(stp.listing_caption(block.number, block.caption))
+        lines.append(NOINDENT + caption + PAR_NOBREAK)
+    lines.append(VERBATIM_INPUT % source.name)
+    lines.append(SKIP_LINE)
+    return NEWLINE.join(lines)
 
 
 def _preamble() -> str:
@@ -197,11 +208,14 @@ class TexRenderer:
             parts.append(_title_page(meta))
         if meta.get("toc", True):
             parts.append(_contents())
-        figure_count = 0
+        figure_count = listing_count = 0
         for block in blocks:
             if block.kind is Kind.FIGURE:
                 figure_count += 1
                 parts.append(_figure(block, build_dir, base_dir, figure_count))
+            elif block.kind is Kind.CODE:
+                listing_count += 1
+                parts.append(_code(block, build_dir, listing_count))
             else:
                 parts.append(self._render_block(block))
         parts.append(r"\end{document}")
@@ -215,6 +229,5 @@ class TexRenderer:
             Kind.PARAGRAPH: lambda: inline(block.text) + "\n",
             Kind.LIST: lambda: "".join(inline(line) + "\n" for line in stp.list_items(block.items)),
             Kind.TABLE: lambda: _table(block),
-            Kind.CODE: lambda: _code(block),
         }
         return handlers[block.kind]()
