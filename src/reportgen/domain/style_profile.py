@@ -52,7 +52,7 @@ def _openers(sentences: list[str], limit: int = 15) -> list[str]:
 
 def _signature_phrases(sentences: list[str], limit: int = 25) -> list[str]:
     words = [w.lower() for s in sentences for w in WORD_RE.findall(s)]
-    bigrams = Counter(zip(words, words[1:]))
+    bigrams = Counter(zip(words, words[1:], strict=False))
     content = {" ".join(pair): n for pair, n in bigrams.items() if not (set(pair) & STOP_WORDS) and n >= MIN_PHRASE_COUNT}
     return [phrase for phrase, _ in Counter(content).most_common(limit)]
 

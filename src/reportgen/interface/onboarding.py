@@ -5,8 +5,8 @@ import webbrowser
 from pathlib import Path
 
 from reportgen.application.learn_style import learn_style
-from reportgen.infrastructure import settings
 from reportgen.domain.personal import PersonalProfile
+from reportgen.infrastructure import settings
 from reportgen.infrastructure.file_stores import FileStyleStore
 from reportgen.infrastructure.profile_vault import LocalProfileStore
 from reportgen.infrastructure.readers import DocumentProseSource

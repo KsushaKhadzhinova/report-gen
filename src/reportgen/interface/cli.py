@@ -13,8 +13,8 @@ from reportgen.application.check_report import check_overlap, lint_report
 from reportgen.application.fix_report import ReportFixer
 from reportgen.application.learn_style import learn_style
 from reportgen.application.write_report import WritingContext
-from reportgen.domain.personal import PersonalProfile
 from reportgen.domain.outline import structure_from_outline
+from reportgen.domain.personal import PersonalProfile
 from reportgen.domain.structure import Structure
 from reportgen.infrastructure import settings
 from reportgen.infrastructure.code_inspector import ProjectCodeInspector
