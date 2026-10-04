@@ -26,6 +26,18 @@ providers:
         - nvidia/nemotron-3-super-120b-a12b:free
         - openrouter/free
 
+  gemini:
+    description: Google Gemini через AI Studio, бесплатный ключ
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    api_key_env: GEMINI_API_KEY
+    signup_url: https://aistudio.google.com/apikey
+    roles:
+      writer: [gemini-2.5-flash, gemini-2.5-flash-lite]
+      rewriter: [gemini-2.5-flash, gemini-2.5-flash-lite]
+      reviewer: [gemini-2.5-flash, gemini-2.5-flash-lite]
+      vision: [gemini-2.5-flash]
+      utility: [gemini-2.5-flash-lite]
+
   local:
     description: Ollama на этом компьютере
     base_url: http://localhost:11434/v1

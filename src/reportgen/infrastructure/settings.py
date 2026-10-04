@@ -40,6 +40,7 @@ class Provider:
     description: str
     base_url: str
     api_key: str | None
+    api_key_env: str | None
     signup_url: str | None
     roles: dict[str, list[str]]
 
@@ -68,6 +69,7 @@ def get_provider(name: str | None = None) -> Provider:
         description=raw.get("description", ""),
         base_url=base_url.rstrip("/"),
         api_key=os.environ.get(api_key_env) if api_key_env else None,
+        api_key_env=api_key_env,
         signup_url=raw.get("signup_url"),
         roles=raw["roles"],
     )
