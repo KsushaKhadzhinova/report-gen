@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import shutil
 
-from reportgen.settings import get_provider
+from reportgen.infrastructure.settings import get_provider
 
 
 def checks() -> list[tuple[str, bool, str]]:

@@ -4,7 +4,11 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from reportgen import doctor, settings, style
+from reportgen.application.learn_style import learn_style
+from reportgen.infrastructure import settings
+from reportgen.infrastructure.file_stores import FileStyleStore
+from reportgen.infrastructure.readers import DocumentProseSource
+from reportgen.interface import doctor
 
 MARKER = ".onboarded"
 
@@ -71,8 +75,8 @@ def _learn_style() -> None:
     if not folder:
         return
     try:
-        profile = style.learn(Path(folder))
-        print(f"Изучено документов: {len(profile['documents'])}, абзацев: {profile['paragraphs']}.")
+        profile = learn_style(DocumentProseSource(), Path(folder), FileStyleStore())
+        print(f"Изучено документов: {len(profile.documents)}, абзацев: {profile.paragraphs}.")
     except (ValueError, OSError) as exc:
         print(f"Не удалось изучить работы: {exc}")
 

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import yaml
 
-META_TEMPLATE = {
+WORK_FOLDERS = ("content", "screenshots", "diagrams", "output")
+
+META_DEFAULTS = {
     "ministry": "Министерство образования Республики Беларусь",
     "university": "Учреждение образования «Белорусский государственный университет информатики и радиоэлектроники»",
     "faculty": "",
@@ -20,6 +22,7 @@ META_TEMPLATE = {
     "title_page": True,
     "toc": True,
 }
+LAB_OVERRIDES = {"work_type": "ОТЧЁТ ПО ЛАБОРАТОРНОЙ РАБОТЕ", "toc": False}
 
 BRIEF_TEMPLATE = """# Сведения о работе
 
@@ -28,7 +31,7 @@ BRIEF_TEMPLATE = """# Сведения о работе
 Чем подробнее этот файл, тем точнее получится текст.
 """
 
-SCREENS_TEMPLATE = """# Скриншоты и диаграммы для записки. Запуск: report-gen shots <проект>
+SCREENS_TEMPLATE = """# План скриншотов и диаграмм. Запуск: report-gen shots <работа>
 # start: python app.py        # команда запуска приложения (необязательно)
 # start_wait: 8
 items: []
@@ -40,12 +43,9 @@ items: []
 """
 
 
-def init(directory: Path, work_type: str = "coursework", title: str = "") -> Path:
+def scaffold_project(directory: Path, lab: bool = False, title: str = "") -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    meta = dict(META_TEMPLATE)
-    meta["title"] = title
-    if work_type == "lab":
-        meta.update({"work_type": "ОТЧЁТ ПО ЛАБОРАТОРНОЙ РАБОТЕ", "toc": False})
+    meta = {**META_DEFAULTS, "title": title, **(LAB_OVERRIDES if lab else {})}
     files = {
         "meta.yaml": yaml.safe_dump(meta, allow_unicode=True, sort_keys=False),
         "brief.md": BRIEF_TEMPLATE,
@@ -53,9 +53,9 @@ def init(directory: Path, work_type: str = "coursework", title: str = "") -> Pat
         "screens.yaml": SCREENS_TEMPLATE,
     }
     for name, content in files.items():
-        path = directory / name
-        if not path.exists():
-            path.write_text(content, encoding="utf-8")
-    for sub in ("content", "screenshots", "diagrams", "output"):
-        (directory / sub).mkdir(exist_ok=True)
+        target = directory / name
+        if not target.exists():
+            target.write_text(content, encoding="utf-8")
+    for folder in WORK_FOLDERS:
+        (directory / folder).mkdir(exist_ok=True)
     return directory

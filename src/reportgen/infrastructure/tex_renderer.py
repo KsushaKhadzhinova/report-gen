@@ -4,8 +4,8 @@ import re
 import shutil
 from pathlib import Path
 
-from reportgen import stp
-from reportgen.document import Block
+from reportgen.domain import stp
+from reportgen.domain.blocks import Block, Kind
 
 SPECIAL = {
     "\\": r"\textbackslash{}",
@@ -171,44 +171,50 @@ def _code(block: Block) -> str:
     return "\n".join(out)
 
 
-def render(blocks: list[Block], meta: dict, base: Path, build_dir: Path) -> Path:
-    build_dir.mkdir(parents=True, exist_ok=True)
-    parts = [
-        PREAMBLE
-        % {
-            "left": stp.MARGIN_LEFT_MM,
-            "right": stp.MARGIN_RIGHT_MM,
-            "top": stp.MARGIN_TOP_MM,
-            "bottom": stp.MARGIN_BOTTOM_MM,
-            "indent": stp.PARAGRAPH_INDENT_CM,
+def _preamble() -> str:
+    return PREAMBLE % {
+        "left": stp.MARGIN_LEFT_MM,
+        "right": stp.MARGIN_RIGHT_MM,
+        "top": stp.MARGIN_TOP_MM,
+        "bottom": stp.MARGIN_BOTTOM_MM,
+        "indent": stp.PARAGRAPH_INDENT_CM,
+    }
+
+
+def _contents() -> str:
+    return (
+        r"\clearpage\begin{center}\textbf{СОДЕРЖАНИЕ}\end{center}\vspace{\baselineskip}"
+        "\n" r"\renewcommand{\contentsname}{}\tableofcontents"
+    )
+
+
+class TexRenderer:
+    def render(self, blocks: list[Block], meta: dict, base_dir: Path, output: Path) -> Path:
+        build_dir = output.parent
+        build_dir.mkdir(parents=True, exist_ok=True)
+        parts = [_preamble()]
+        if meta.get("title_page", True):
+            parts.append(_title_page(meta))
+        if meta.get("toc", True):
+            parts.append(_contents())
+        figure_count = 0
+        for block in blocks:
+            if block.kind is Kind.FIGURE:
+                figure_count += 1
+                parts.append(_figure(block, build_dir, base_dir, figure_count))
+            else:
+                parts.append(self._render_block(block))
+        parts.append(r"\end{document}")
+        output.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+        return output
+
+    @staticmethod
+    def _render_block(block: Block) -> str:
+        handlers = {
+            Kind.HEADING: lambda: _heading(block),
+            Kind.PARAGRAPH: lambda: inline(block.text) + "\n",
+            Kind.LIST: lambda: "".join(inline(line) + "\n" for line in stp.list_items(block.items)),
+            Kind.TABLE: lambda: _table(block),
+            Kind.CODE: lambda: _code(block),
         }
-    ]
-    if meta.get("title_page", True):
-        parts.append(_title_page(meta))
-    if meta.get("toc", True):
-        parts.append(
-            r"\clearpage\begin{center}\textbf{СОДЕРЖАНИЕ}\end{center}\vspace{\baselineskip}"
-            "\n" r"\renewcommand{\contentsname}{}\tableofcontents"
-        )
-
-    figures = 0
-    for block in blocks:
-        if block.kind == "heading":
-            parts.append(_heading(block))
-        elif block.kind == "paragraph":
-            parts.append(inline(block.text) + "\n")
-        elif block.kind == "list":
-            for line in stp.list_items(block.items):
-                parts.append(inline(line) + "\n")
-        elif block.kind == "figure":
-            figures += 1
-            parts.append(_figure(block, build_dir, base, figures))
-        elif block.kind == "table":
-            parts.append(_table(block))
-        elif block.kind == "code":
-            parts.append(_code(block))
-    parts.append(r"\end{document}")
-
-    tex = build_dir / "note.tex"
-    tex.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
-    return tex
+        return handlers[block.kind]()
