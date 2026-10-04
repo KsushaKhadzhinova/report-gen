@@ -11,7 +11,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
 from PIL import Image
 
-from reportgen.domain import stp
+from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
 from reportgen.infrastructure.safe_paths import resolve_inside
 
@@ -22,38 +22,38 @@ FIGURE_MAX_HEIGHT_CM = 20.0
 
 def _configure_styles(doc: Document) -> None:
     normal = doc.styles["Normal"]
-    normal.font.name = stp.FONT
-    normal.font.size = Pt(stp.FONT_SIZE_PT)
-    normal.element.rPr.rFonts.set(qn("w:eastAsia"), stp.FONT)
+    normal.font.name = standard.FONT
+    normal.font.size = Pt(standard.FONT_SIZE_PT)
+    normal.element.rPr.rFonts.set(qn("w:eastAsia"), standard.FONT)
     fmt = normal.paragraph_format
     fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-    fmt.line_spacing = Pt(stp.LINE_SPACING_PT)
+    fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
     fmt.space_before = Pt(0)
     fmt.space_after = Pt(0)
     for name in ("Heading 1", "Heading 2", "Heading 3"):
         style = doc.styles[name]
-        style.font.name = stp.FONT
-        style.font.size = Pt(stp.FONT_SIZE_PT)
+        style.font.name = standard.FONT
+        style.font.size = Pt(standard.FONT_SIZE_PT)
         style.font.bold = True
         style.font.italic = False
         style.font.color.rgb = None
-        style.element.rPr.rFonts.set(qn("w:eastAsia"), stp.FONT)
-        style.element.rPr.rFonts.set(qn("w:ascii"), stp.FONT)
-        style.element.rPr.rFonts.set(qn("w:hAnsi"), stp.FONT)
+        style.element.rPr.rFonts.set(qn("w:eastAsia"), standard.FONT)
+        style.element.rPr.rFonts.set(qn("w:ascii"), standard.FONT)
+        style.element.rPr.rFonts.set(qn("w:hAnsi"), standard.FONT)
         style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-        style.paragraph_format.line_spacing = Pt(stp.LINE_SPACING_PT)
+        style.paragraph_format.line_spacing = Pt(standard.LINE_SPACING_PT)
         style.paragraph_format.space_before = Pt(0)
-        style.paragraph_format.space_after = Pt(stp.LINE_SPACING_PT)
+        style.paragraph_format.space_after = Pt(standard.LINE_SPACING_PT)
         style.paragraph_format.keep_with_next = True
 
 
 def _configure_page(doc: Document) -> None:
     section = doc.sections[0]
     section.page_width, section.page_height = Mm(210), Mm(297)
-    section.left_margin = Mm(stp.MARGIN_LEFT_MM)
-    section.right_margin = Mm(stp.MARGIN_RIGHT_MM)
-    section.top_margin = Mm(stp.MARGIN_TOP_MM)
-    section.bottom_margin = Mm(stp.MARGIN_BOTTOM_MM)
+    section.left_margin = Mm(standard.MARGIN_LEFT_MM)
+    section.right_margin = Mm(standard.MARGIN_RIGHT_MM)
+    section.top_margin = Mm(standard.MARGIN_TOP_MM)
+    section.bottom_margin = Mm(standard.MARGIN_BOTTOM_MM)
 
 
 def _field(paragraph, instruction: str) -> None:
@@ -97,7 +97,7 @@ def _body(doc: Document, text: str, indent: bool = True):
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     if indent:
-        paragraph.paragraph_format.first_line_indent = Cm(stp.PARAGRAPH_INDENT_CM)
+        paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
     _add_runs(paragraph, text)
     return paragraph
 
@@ -132,7 +132,7 @@ def _heading(doc: Document, block: Block) -> None:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     else:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        paragraph.paragraph_format.first_line_indent = Cm(stp.PARAGRAPH_INDENT_CM)
+        paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
 
 
 def _picture_width_cm(path: Path) -> float:
@@ -152,7 +152,7 @@ def _figure(doc: Document, block: Block, base: Path) -> None:
         paragraph.add_run(f"[нет файла: {block.path}]")
     caption = doc.add_paragraph()
     caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    caption.add_run(stp.figure_caption(block.number, block.caption))
+    caption.add_run(standard.figure_caption(block.number, block.caption))
     _blank(doc)
 
 
@@ -173,7 +173,7 @@ def _table(doc: Document, block: Block) -> None:
         caption = doc.add_paragraph()
         caption.alignment = WD_ALIGN_PARAGRAPH.LEFT
         caption.paragraph_format.keep_with_next = True
-        caption.add_run(stp.table_caption(block.number, block.caption))
+        caption.add_run(standard.table_caption(block.number, block.caption))
     rows = block.rows
     columns = max(len(r) for r in rows)
     table = doc.add_table(rows=len(rows), cols=columns)
@@ -195,7 +195,7 @@ def _code(doc: Document, block: Block) -> None:
     if block.caption:
         caption = doc.add_paragraph()
         caption.paragraph_format.keep_with_next = True
-        caption.add_run(stp.listing_caption(block.number, block.caption))
+        caption.add_run(standard.listing_caption(block.number, block.caption))
     for line in block.text.splitlines() or [""]:
         paragraph = doc.add_paragraph()
         paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
@@ -252,7 +252,7 @@ def _request_field_update(doc: Document) -> None:
 
 
 def _list(doc: Document, block: Block) -> None:
-    for line in stp.list_items(block.items):
+    for line in standard.list_items(block.items):
         _body(doc, line)
 
 

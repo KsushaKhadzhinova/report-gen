@@ -21,7 +21,7 @@ def sample_blocks():
     return result
 
 
-def test_docx_has_stp_page_setup_and_passes_audit(tmp_path: Path):
+def test_docx_has_standard_page_setup_and_passes_audit(tmp_path: Path):
     output = DocxRenderer().render(sample_blocks(), {"title": "Тест"}, tmp_path, tmp_path / "note.docx")
     section = Document(str(output)).sections[0]
     assert abs(section.left_margin - Mm(30)) < Mm(0.5)
@@ -44,7 +44,7 @@ def test_formatter_repairs_margins_and_indent(tmp_path: Path):
 def test_tex_output_contains_chapter_command_and_escapes(tmp_path: Path):
     tex = TexRenderer().render(sample_blocks(), {"title": "Тест"}, tmp_path, tmp_path / "tex" / "note.tex")
     text = tex.read_text(encoding="utf-8")
-    assert r"\stpchapter{1}{АНАЛИЗ}" in text
+    assert r"\chapterheading{1}{АНАЛИЗ}" in text
     assert "нет файла" in text
     assert escape("a_b & 50%") == r"a\_b \& 50\%"
 

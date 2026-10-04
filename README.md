@@ -95,9 +95,9 @@ projects/kursach/
 
 ```bash
 ./report-gen.sh init projects/lab3 --type lab
-./report-gen.sh lab projects/lab3 --task /code/zadanie.docx
+./report-gen.sh lab projects/lab3 --task /code/task.docx
 ./report-gen.sh from-sample projects/kursach --sample /code/obrazec.docx
-./report-gen.sh fix otchet.docx --remarks zamechaniya.txt --reference workspace/reference
+./report-gen.sh fix report.docx --remarks remarks.txt --reference workspace/reference
 ```
 
 ## Проверка совпадений

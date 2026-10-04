@@ -1,4 +1,5 @@
-from reportgen.domain import overlap, stp
+from reportgen.domain import enterprise_standard as standard
+from reportgen.domain import overlap
 from reportgen.domain.blocks import Kind
 from reportgen.domain.lint_rules import check_blocks
 from reportgen.domain.markup import parse
@@ -56,13 +57,13 @@ def test_appendix_numbering_uses_letters():
     assert blocks[1].number == "А.1"
 
 
-def test_list_items_follow_stp_punctuation():
-    assert stp.list_items(["один", "два"]) == ["– один;", "– два."]
+def test_list_items_follow_standard_punctuation():
+    assert standard.list_items(["один", "два"]) == ["– один;", "– два."]
 
 
 def test_captions_use_dash():
-    assert stp.figure_caption("2.1", "Схема") == "Рисунок 2.1 – Схема"
-    assert stp.table_caption("2.1", "Данные") == "Таблица 2.1 – Данные"
+    assert standard.figure_caption("2.1", "Схема") == "Рисунок 2.1 – Схема"
+    assert standard.table_caption("2.1", "Данные") == "Таблица 2.1 – Данные"
 
 
 def test_overlap_flags_only_copied_paragraph():

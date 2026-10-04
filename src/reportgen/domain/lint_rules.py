@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from reportgen.domain import stp
+from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
 
 FIRST_PERSON_RE = re.compile(r"(?<![а-яё])(я|мы|наш\w*|мой|моя)(?![а-яё])", re.IGNORECASE)
@@ -49,7 +49,7 @@ def _check_heading(block: Block, previous_level: int) -> list[Issue]:
     issues = []
     if previous_level and block.level > previous_level + 1:
         issues.append(_error(block.source, f"Пропущен уровень заголовка перед «{block.text}»"))
-    if block.level == 1 and block.numbered and not block.appendix and block.text.upper() in stp.UNNUMBERED_HEADINGS:
+    if block.level == 1 and block.numbered and not block.appendix and block.text.upper() in standard.UNNUMBERED_HEADINGS:
         issues.append(_error(block.source, f"Заголовок «{block.text}» не нумеруется: добавьте {{-}}"))
     return issues
 

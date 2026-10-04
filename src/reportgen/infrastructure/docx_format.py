@@ -8,7 +8,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
 
-from reportgen.domain import stp
+from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.lint_rules import Issue
 
 MIN_BODY_PARAGRAPH_CHARS = 80
@@ -31,13 +31,13 @@ def _is_body(paragraph) -> bool:
 
 def _has_foreign_font(paragraph) -> bool:
     return any(
-        run.font.name not in (None, stp.FONT) or run.font.size not in (None, Pt(stp.FONT_SIZE_PT)) for run in paragraph.runs
+        run.font.name not in (None, standard.FONT) or run.font.size not in (None, Pt(standard.FONT_SIZE_PT)) for run in paragraph.runs
     )
 
 
 def _has_wrong_indent(paragraph) -> bool:
     indent = paragraph.paragraph_format.first_line_indent
-    return indent is None or abs(indent - Cm(stp.PARAGRAPH_INDENT_CM)) > INDENT_TOLERANCE
+    return indent is None or abs(indent - Cm(standard.PARAGRAPH_INDENT_CM)) > INDENT_TOLERANCE
 
 
 def _is_heading(paragraph) -> bool:
@@ -57,10 +57,10 @@ def _is_table_caption(paragraph) -> bool:
 def _margin_issues(document, name: str) -> list[Issue]:
     section = document.sections[0]
     expected = {
-        "левое поле": (section.left_margin, stp.MARGIN_LEFT_MM),
-        "правое поле": (section.right_margin, stp.MARGIN_RIGHT_MM),
-        "верхнее поле": (section.top_margin, stp.MARGIN_TOP_MM),
-        "нижнее поле": (section.bottom_margin, stp.MARGIN_BOTTOM_MM),
+        "левое поле": (section.left_margin, standard.MARGIN_LEFT_MM),
+        "правое поле": (section.right_margin, standard.MARGIN_RIGHT_MM),
+        "верхнее поле": (section.top_margin, standard.MARGIN_TOP_MM),
+        "нижнее поле": (section.bottom_margin, standard.MARGIN_BOTTOM_MM),
     }
     return [
         Issue("error", name, f"{label}: ожидается {wanted_mm} мм")
@@ -95,8 +95,8 @@ class DocxFormatService:
     def audit(self, path: Path) -> list[Issue]:
         document = Document(str(path))
         issues = _margin_issues(document, path.name)
-        if document.styles["Normal"].font.name != stp.FONT:
-            issues.append(Issue("error", path.name, f"Шрифт Normal не {stp.FONT}"))
+        if document.styles["Normal"].font.name != standard.FONT:
+            issues.append(Issue("error", path.name, f"Шрифт Normal не {standard.FONT}"))
         body = [p for p in document.paragraphs if _is_body(p)]
         counts = {
             "абзацев с другим шрифтом или размером": sum(_has_foreign_font(p) for p in body),
@@ -129,15 +129,15 @@ class DocxFormatService:
         fmt = paragraph.paragraph_format
         centered = paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if centered else WD_ALIGN_PARAGRAPH.LEFT
-        fmt.first_line_indent = None if centered else Cm(stp.PARAGRAPH_INDENT_CM)
+        fmt.first_line_indent = None if centered else Cm(standard.PARAGRAPH_INDENT_CM)
         fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-        fmt.line_spacing = Pt(stp.LINE_SPACING_PT)
+        fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
         fmt.space_before = Pt(0)
-        fmt.space_after = Pt(stp.LINE_SPACING_PT)
+        fmt.space_after = Pt(standard.LINE_SPACING_PT)
         fmt.keep_with_next = True
         for run in paragraph.runs:
-            run.font.name = stp.FONT
-            run.font.size = Pt(stp.FONT_SIZE_PT)
+            run.font.name = standard.FONT
+            run.font.size = Pt(standard.FONT_SIZE_PT)
             run.font.bold = True
         return 1
 
@@ -151,32 +151,32 @@ class DocxFormatService:
     @staticmethod
     def _fix_page(document) -> None:
         for section in document.sections:
-            section.left_margin = Mm(stp.MARGIN_LEFT_MM)
-            section.right_margin = Mm(stp.MARGIN_RIGHT_MM)
-            section.top_margin = Mm(stp.MARGIN_TOP_MM)
-            section.bottom_margin = Mm(stp.MARGIN_BOTTOM_MM)
+            section.left_margin = Mm(standard.MARGIN_LEFT_MM)
+            section.right_margin = Mm(standard.MARGIN_RIGHT_MM)
+            section.top_margin = Mm(standard.MARGIN_TOP_MM)
+            section.bottom_margin = Mm(standard.MARGIN_BOTTOM_MM)
 
     @staticmethod
     def _fix_normal_style(document) -> None:
         normal = document.styles["Normal"]
-        normal.font.name = stp.FONT
-        normal.font.size = Pt(stp.FONT_SIZE_PT)
-        normal.element.rPr.rFonts.set(qn("w:eastAsia"), stp.FONT)
+        normal.font.name = standard.FONT
+        normal.font.size = Pt(standard.FONT_SIZE_PT)
+        normal.element.rPr.rFonts.set(qn("w:eastAsia"), standard.FONT)
 
     @staticmethod
     def _fix_paragraph(paragraph) -> int:
         if paragraph.style.name.startswith("Heading") or not paragraph.text.strip():
             return 0
         for run in paragraph.runs:
-            run.font.name = stp.FONT
-            run.font.size = Pt(stp.FONT_SIZE_PT)
+            run.font.name = standard.FONT
+            run.font.size = Pt(standard.FONT_SIZE_PT)
         if not _is_body(paragraph):
             return 0
         fmt = paragraph.paragraph_format
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        fmt.first_line_indent = Cm(stp.PARAGRAPH_INDENT_CM)
+        fmt.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
         fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
-        fmt.line_spacing = Pt(stp.LINE_SPACING_PT)
+        fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
         fmt.space_before = Pt(0)
         fmt.space_after = Pt(0)
         return 1

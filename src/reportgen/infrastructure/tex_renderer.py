@@ -4,7 +4,7 @@ import re
 import shutil
 from pathlib import Path
 
-from reportgen.domain import stp
+from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
 from reportgen.infrastructure.safe_paths import resolve_inside
 
@@ -56,12 +56,12 @@ PREAMBLE = r"""\documentclass[a4paper,14pt]{extarticle}
 \setlength{\cftbeforesecskip}{0pt}
 \setlength{\cftbeforesubsecskip}{0pt}
 
-\newcommand{\stpchapter}[2]{\clearpage\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{section}{#1 #2}}
-\newcommand{\stpsection}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{subsection}{#1 #2}}
-\newcommand{\stpsubsection}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}}
-\newcommand{\stpplain}[1]{\clearpage\begin{center}\textbf{#1}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{#1}}
-\newcommand{\stpappendix}[2]{\clearpage\begin{center}\textbf{ПРИЛОЖЕНИЕ #1}\\\textbf{#2}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{ПРИЛОЖЕНИЕ #1 #2}}
-\newcommand{\stpdash}{\textendash}
+\newcommand{\chapterheading}[2]{\clearpage\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{section}{#1 #2}}
+\newcommand{\sectionheading}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{subsection}{#1 #2}}
+\newcommand{\subsectionheading}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}}
+\newcommand{\plainheading}[1]{\clearpage\begin{center}\textbf{#1}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{#1}}
+\newcommand{\appendixheading}[2]{\clearpage\begin{center}\textbf{ПРИЛОЖЕНИЕ #1}\\\textbf{#2}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{ПРИЛОЖЕНИЕ #1 #2}}
+\newcommand{\endash}{\textendash}
 
 \begin{document}
 """
@@ -118,10 +118,10 @@ def _title_page(meta: dict) -> str:
 def _heading(block: Block) -> str:
     title = escape(block.text)
     if block.appendix:
-        return rf"\stpappendix{{{block.number}}}{{{title}}}"
+        return rf"\appendixheading{{{block.number}}}{{{title}}}"
     if block.level == 1 and not block.numbered:
-        return rf"\stpplain{{{title}}}"
-    command = {1: "stpchapter", 2: "stpsection", 3: "stpsubsection"}[block.level]
+        return rf"\plainheading{{{title}}}"
+    command = {1: "chapterheading", 2: "sectionheading", 3: "subsectionheading"}[block.level]
     return rf"\{command}{{{block.number}}}{{{title}}}"
 
 
@@ -131,7 +131,7 @@ def _table(block: Block) -> str:
     spec = "|" + "|".join([r">{\raggedright\arraybackslash}p{%.3f\textwidth}" % (0.98 / columns)] * columns) + "|"
     out = []
     if block.caption:
-        out.append(r"\noindent " + escape(stp.table_caption(block.number, block.caption)) + r"\par\nopagebreak")
+        out.append(r"\noindent " + escape(standard.table_caption(block.number, block.caption)) + r"\par\nopagebreak")
     out.append(r"\begin{longtable}{%s}" % spec)
     out.append(r"\hline")
     for index, row in enumerate(rows):
@@ -152,7 +152,7 @@ def _figure(block: Block, build_dir: Path, base: Path, counter: int) -> str:
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / f"fig{counter}{source.suffix.lower()}"
     shutil.copyfile(source, target)
-    caption = escape(stp.figure_caption(block.number, block.caption))
+    caption = escape(standard.figure_caption(block.number, block.caption))
     return (
         "\\begin{center}\n"
         f"\\includegraphics[width=\\textwidth,height=0.6\\textheight,keepaspectratio]{{figures/{target.name}}}\\par\n"
@@ -175,7 +175,7 @@ def _code(block: Block, build_dir: Path, counter: int) -> str:
     source.write_text(block.text, encoding="utf-8")
     lines = []
     if block.caption:
-        caption = escape(stp.listing_caption(block.number, block.caption))
+        caption = escape(standard.listing_caption(block.number, block.caption))
         lines.append(NOINDENT + caption + PAR_NOBREAK)
     lines.append(VERBATIM_INPUT % source.name)
     lines.append(SKIP_LINE)
@@ -184,11 +184,11 @@ def _code(block: Block, build_dir: Path, counter: int) -> str:
 
 def _preamble() -> str:
     return PREAMBLE % {
-        "left": stp.MARGIN_LEFT_MM,
-        "right": stp.MARGIN_RIGHT_MM,
-        "top": stp.MARGIN_TOP_MM,
-        "bottom": stp.MARGIN_BOTTOM_MM,
-        "indent": stp.PARAGRAPH_INDENT_CM,
+        "left": standard.MARGIN_LEFT_MM,
+        "right": standard.MARGIN_RIGHT_MM,
+        "top": standard.MARGIN_TOP_MM,
+        "bottom": standard.MARGIN_BOTTOM_MM,
+        "indent": standard.PARAGRAPH_INDENT_CM,
     }
 
 
@@ -227,7 +227,7 @@ class TexRenderer:
         handlers = {
             Kind.HEADING: lambda: _heading(block),
             Kind.PARAGRAPH: lambda: inline(block.text) + "\n",
-            Kind.LIST: lambda: "".join(inline(line) + "\n" for line in stp.list_items(block.items)),
+            Kind.LIST: lambda: "".join(inline(line) + "\n" for line in standard.list_items(block.items)),
             Kind.TABLE: lambda: _table(block),
         }
         return handlers[block.kind]()
