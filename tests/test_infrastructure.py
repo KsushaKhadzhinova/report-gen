@@ -58,3 +58,14 @@ def test_repository_round_trip(tmp_path: Path):
     assert repository.cached_fingerprint("01") == "abc"
     assert repository.read_meta()["title"] == "Тема"
     assert [b.text for b in repository.load_blocks()] == ["ВВЕДЕНИЕ", "Текст."]
+
+
+def test_builtin_structures_are_valid_yaml():
+    import yaml
+
+    from reportgen.domain.structure import Structure
+    from reportgen.infrastructure.settings import read_data
+
+    for name in ("coursework", "lab"):
+        structure = Structure.from_dict(yaml.safe_load(read_data(f"{name}.yaml")))
+        assert structure.sections and all(section.title for section in structure.sections)
