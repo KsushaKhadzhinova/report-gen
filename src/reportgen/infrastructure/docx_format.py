@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from docx import Document
@@ -12,11 +13,18 @@ from reportgen.domain.lint_rules import Issue
 
 MIN_BODY_PARAGRAPH_CHARS = 80
 MARGIN_TOLERANCE = Mm(1)
+CAPTION_RE = re.compile(r"^(Рисунок|Таблица|Листинг)\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 INDENT_TOLERANCE = Cm(0.1)
 
 
+def _is_caption(paragraph) -> bool:
+    return CAPTION_RE.match(paragraph.text.strip()) is not None
+
+
 def _is_body(paragraph) -> bool:
-    return len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS and not paragraph.style.name.startswith("Heading")
+    long_enough = len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS
+    centered = paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    return long_enough and not centered and not paragraph.style.name.startswith("Heading") and not _is_caption(paragraph)
 
 
 def _has_foreign_font(paragraph) -> bool:
@@ -116,7 +124,7 @@ class DocxFormatService:
         for run in paragraph.runs:
             run.font.name = stp.FONT
             run.font.size = Pt(stp.FONT_SIZE_PT)
-        if len(paragraph.text) < MIN_BODY_PARAGRAPH_CHARS or paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER:
+        if not _is_body(paragraph):
             return 0
         fmt = paragraph.paragraph_format
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
