@@ -12,6 +12,7 @@ from reportgen.infrastructure.settings import Provider, get_provider
 RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 MODELS_TIMEOUT_SECONDS = 30
 AUTO_MODEL = "auto"
+CHECK_MAX_TOKENS = 512
 
 
 class LLMError(RuntimeError):
@@ -46,14 +47,18 @@ class OpenAICompatibleModel:
         return self._complete("vision", [{"role": "user", "content": content}], 0.3, 400)
 
     def check(self) -> list[tuple[str, str, bool, str]]:
-        """Проверяет доступность первой модели каждой роли."""
+        """Для каждой роли возвращает первую отвечающую модель цепочки или последнюю ошибку."""
         results = []
         for role, models in self.provider.roles.items():
-            try:
-                self._request(models[0], [{"role": "user", "content": "Ответь одним словом: да"}], 0, 8)
-                results.append((role, models[0], True, "ok"))
-            except LLMError as error:
-                results.append((role, models[0], False, self._scrub(str(error))[:120]))
+            outcome = (role, models[0], False, "нет моделей")
+            for model in models:
+                try:
+                    self._request(model, [{"role": "user", "content": "Ответь одним словом: да"}], 0, CHECK_MAX_TOKENS)
+                    outcome = (role, model, True, "ok")
+                    break
+                except LLMError as error:
+                    outcome = (role, model, False, self._scrub(str(error))[:120])
+            results.append(outcome)
         return results
 
     def _complete(self, role: str, messages: list[dict], temperature: float, max_tokens: int | None) -> str:
