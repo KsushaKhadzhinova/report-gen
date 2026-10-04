@@ -1,0 +1,27 @@
+services:
+  report-gen:
+    build: .
+    image: report-gen:latest
+    stdin_open: true
+    tty: true
+    working_dir: /work
+    volumes:
+      - ./:/work
+      - ${REPORTGEN_CODE_DIR:-./projects}:/code:ro
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      REPORTGEN_HOME: /work/workspace
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local"]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  ollama-models:
