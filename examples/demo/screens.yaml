@@ -1,0 +1,2 @@
+items:
+  - {kind: console, name: step1, command: "python --version", caption: "Результат запуска интерпретатора"}
