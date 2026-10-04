@@ -6,7 +6,9 @@ from pathlib import Path
 
 from reportgen.application.learn_style import learn_style
 from reportgen.infrastructure import settings
+from reportgen.domain.personal import PersonalProfile
 from reportgen.infrastructure.file_stores import FileStyleStore
+from reportgen.infrastructure.profile_vault import LocalProfileStore
 from reportgen.infrastructure.readers import DocumentProseSource
 from reportgen.interface import doctor
 
@@ -84,11 +86,24 @@ def _learn_style() -> None:
         print(f"Не удалось изучить работы: {exc}")
 
 
+def _enter_profile() -> None:
+    store = LocalProfileStore()
+    if store.load() is not None:
+        return
+    print("\nШаг 3. Данные для титульного листа. Они хранятся только на этом компьютере и в git не попадают.")
+    print("Можно пропустить (Enter): тогда на титульном листе останутся заглушки <ФИО студента>, <группа>, <руководитель>.")
+    student = _ask("ФИО:")
+    if not student:
+        return
+    store.save(PersonalProfile(student=student, group=_ask("Группа:"), supervisor=_ask("Руководитель:")))
+
+
 def run() -> None:
     print(INTRO)
     _setup_provider()
     _learn_style()
-    print("\nШаг 3. Проверка окружения.")
+    _enter_profile()
+    print("\nШаг 4. Проверка окружения.")
     for name, ok, hint in doctor.checks():
         print(f"  [{'+' if ok else '-'}] {name}" + (f"  ({hint})" if not ok and hint else ""))
     print(

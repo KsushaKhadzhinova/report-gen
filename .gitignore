@@ -24,3 +24,7 @@ examples/*/screenshots/
 
 # Передача контекста между сессиями
 HANDOVER.md
+
+# Личные выгрузки
+profile.enc
+unlock.txt
