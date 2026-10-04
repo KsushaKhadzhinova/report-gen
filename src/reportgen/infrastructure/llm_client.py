@@ -13,6 +13,8 @@ RETRY_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 MODELS_TIMEOUT_SECONDS = 30
 AUTO_MODEL = "auto"
 CHECK_MAX_TOKENS = 512
+MAX_TOKEN_BUDGET = 16000
+MAX_PAUSE_SECONDS = 45
 
 
 class LLMError(RuntimeError):
@@ -22,7 +24,7 @@ class LLMError(RuntimeError):
 class OpenAICompatibleModel:
     """Клиент OpenAI-совместимого API с резервными моделями для каждой роли."""
 
-    def __init__(self, provider: Provider | None = None, timeout: int = 300, retries: int = 3) -> None:
+    def __init__(self, provider: Provider | None = None, timeout: int = 300, retries: int = 5) -> None:
         self.provider = provider or get_provider()
         self.timeout = timeout
         self.retries = retries
@@ -92,23 +94,32 @@ class OpenAICompatibleModel:
         return data[0]["id"]
 
     def _request(self, model: str, messages: list[dict], temperature: float, max_tokens: int | None) -> str:
-        payload = {"model": model, "messages": messages, "temperature": temperature}
-        if max_tokens:
-            payload["max_tokens"] = max_tokens
+        budget = max_tokens
         last_problem = ""
         for attempt in range(self.retries):
+            payload = {"model": model, "messages": messages, "temperature": temperature}
+            if budget:
+                payload["max_tokens"] = budget
             response = self._post_once(payload)
             if response is None or response.status_code in RETRY_STATUSES:
                 last_problem = "нет ответа" if response is None else f"HTTP {response.status_code}"
-                time.sleep(2**attempt * 2)
+                time.sleep(self._pause(response, attempt))
                 continue
             if response.status_code != 200:
                 raise LLMError(f"{model}: HTTP {response.status_code} {self._scrub(response.text[:200])}")
-            text = self._extract_text(response.json())
+            text, truncated = self._extract(response.json())
             if text:
                 return text
-            last_problem = "пустой ответ"
+            last_problem = "ответ обрезан до начала текста" if truncated else "пустой ответ"
+            if truncated and budget:
+                budget = min(budget * 2, MAX_TOKEN_BUDGET)
         raise LLMError(f"{model}: {last_problem}")
+
+    @staticmethod
+    def _pause(response: requests.Response | None, attempt: int) -> float:
+        retry_after = response.headers.get("Retry-After", "") if response is not None else ""
+        wait = float(retry_after) if retry_after.replace(".", "", 1).isdigit() else 3 * 2**attempt
+        return min(wait, MAX_PAUSE_SECONDS)
 
     def _post_once(self, payload: dict) -> requests.Response | None:
         try:
@@ -119,6 +130,10 @@ class OpenAICompatibleModel:
             return None
 
     @staticmethod
-    def _extract_text(body: dict) -> str:
+    def _extract(body: dict) -> tuple[str, bool]:
+        """Текст ответа и признак того, что ответ оборван по лимиту токенов."""
         choices = body.get("choices") or []
-        return (choices[0].get("message", {}).get("content") or "").strip() if choices else ""
+        if not choices:
+            return "", False
+        message = choices[0].get("message", {})
+        return (message.get("content") or "").strip(), choices[0].get("finish_reason") == "length"

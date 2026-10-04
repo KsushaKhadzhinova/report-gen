@@ -12,7 +12,7 @@ from reportgen.domain.structure import Section, Structure
 from reportgen.domain.style_profile import style_instruction
 
 MAX_REWRITE_PASSES = 2
-SECTION_MAX_TOKENS = 3000
+SECTION_MAX_TOKENS = 6000
 REWRITE_TEMPERATURE = 0.9
 MARKUP_RE = re.compile(r"^(#+\s*|>\s*)|(\*\*|__)", re.MULTILINE)
 LEADING_NUMBER_RE = re.compile(r"^\d+[.)]?\s*")
