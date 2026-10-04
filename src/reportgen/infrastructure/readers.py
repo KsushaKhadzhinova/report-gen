@@ -75,3 +75,13 @@ def prose_paragraphs(root: Path, min_chars: int = 120) -> list[tuple[str, str]]:
             if len(paragraph) >= min_chars and not paragraph.isupper() and paragraph.count(" ") > 12:
                 result.append((path.name, paragraph))
     return result
+
+
+class DocumentProseSource:
+    """Реализация порта ProseSource поверх файлов docx, pdf, tex, md и txt."""
+
+    def __init__(self, min_chars: int = 120) -> None:
+        self.min_chars = min_chars
+
+    def paragraphs(self, location: Path) -> list[tuple[str, str]]:
+        return prose_paragraphs(location, self.min_chars)

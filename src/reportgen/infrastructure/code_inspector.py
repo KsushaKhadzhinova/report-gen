@@ -93,3 +93,10 @@ def summary_text(info: dict) -> str:
     if info["routes"]:
         lines.append("Маршруты API: " + ", ".join(info["routes"]))
     return "\n".join(lines)
+
+
+class ProjectCodeInspector:
+    """Реализация порта CodeInspector: краткое описание проекта по его файлам."""
+
+    def summarize(self, code_dir: Path) -> str:
+        return summary_text(analyze(code_dir))

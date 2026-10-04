@@ -22,7 +22,7 @@ capture = ["playwright>=1.45", "pyautogui>=0.9"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-report-gen = "reportgen.cli:main"
+report-gen = "reportgen.interface.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

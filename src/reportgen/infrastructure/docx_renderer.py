@@ -11,10 +11,12 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
 from PIL import Image
 
-from reportgen import stp
-from reportgen.document import Block
+from reportgen.domain import stp
+from reportgen.domain.blocks import Block, Kind
 
 INLINE_RE = re.compile(r"(`[^`]+`|\*[^*]+\*)")
+FIGURE_MAX_WIDTH_CM = 15.5
+FIGURE_MAX_HEIGHT_CM = 20.0
 
 
 def _configure_styles(doc: Document) -> None:
@@ -103,29 +105,39 @@ def _blank(doc: Document) -> None:
     doc.add_paragraph()
 
 
-def _heading(doc: Document, block: Block) -> None:
-    centered = block.level == 1 and (block.appendix or not block.numbered)
-    if block.appendix:
-        if doc.paragraphs and doc.paragraphs[-1].text:
-            doc.add_page_break()
-        title = doc.add_paragraph(style="Heading 1")
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        title.add_run(f"ПРИЛОЖЕНИЕ {block.number}")
-        subtitle = doc.add_paragraph(style="Heading 1")
-        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        subtitle.add_run(block.text)
-        return
-    if block.level == 1 and doc.paragraphs and doc.paragraphs[-1].text:
+def _page_break_unless_at_start(doc: Document) -> None:
+    if doc.paragraphs and doc.paragraphs[-1].text:
         doc.add_page_break()
+
+
+def _centered_heading(doc: Document, text: str) -> None:
+    paragraph = doc.add_paragraph(style="Heading 1")
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.add_run(text)
+
+
+def _heading(doc: Document, block: Block) -> None:
+    if block.appendix:
+        _page_break_unless_at_start(doc)
+        _centered_heading(doc, f"ПРИЛОЖЕНИЕ {block.number}")
+        _centered_heading(doc, block.text)
+        return
+    if block.level == 1:
+        _page_break_unless_at_start(doc)
     paragraph = doc.add_paragraph(style=f"Heading {block.level}")
     label = f"{block.number} " if block.number else ""
-    run = paragraph.add_run(f"{label}{block.text}")
-    run.bold = True
-    if centered:
+    paragraph.add_run(f"{label}{block.text}").bold = True
+    if block.is_centered_heading:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     else:
         paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
         paragraph.paragraph_format.first_line_indent = Cm(stp.PARAGRAPH_INDENT_CM)
+
+
+def _picture_width_cm(path: Path) -> float:
+    with Image.open(path) as image:
+        ratio = image.height / image.width
+    return min(FIGURE_MAX_WIDTH_CM, FIGURE_MAX_HEIGHT_CM / ratio)
 
 
 def _figure(doc: Document, block: Block, base: Path) -> None:
@@ -134,14 +146,7 @@ def _figure(doc: Document, block: Block, base: Path) -> None:
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.keep_with_next = True
     if path.is_file():
-        max_width_cm = 16.0
-        with Image.open(path) as image:
-            ratio = image.height / image.width
-        width_cm = min(max_width_cm, 15.5)
-        height_cm = width_cm * ratio
-        if height_cm > 20:
-            width_cm = 20 / ratio
-        paragraph.add_run().add_picture(str(path), width=Cm(width_cm))
+        paragraph.add_run().add_picture(str(path), width=Cm(_picture_width_cm(path)))
     else:
         paragraph.add_run(f"[нет файла: {block.path}]")
     caption = doc.add_paragraph()
@@ -245,32 +250,36 @@ def _request_field_update(doc: Document) -> None:
     settings.append(update)
 
 
-def render(blocks: list[Block], meta: dict, base: Path, output: Path) -> Path:
-    doc = Document()
-    _configure_styles(doc)
-    _configure_page(doc)
-    _page_number_footer(doc)
-    if meta.get("title_page", True):
-        _title_page(doc, meta)
-    if meta.get("toc", True):
-        _toc(doc)
+def _list(doc: Document, block: Block) -> None:
+    for line in stp.list_items(block.items):
+        _body(doc, line)
 
-    for block in blocks:
-        if block.kind == "heading":
-            _heading(doc, block)
-        elif block.kind == "paragraph":
-            _body(doc, block.text)
-        elif block.kind == "list":
-            for line in stp.list_items(block.items):
-                _body(doc, line)
-        elif block.kind == "figure":
-            _figure(doc, block, base)
-        elif block.kind == "table":
-            _table(doc, block)
-        elif block.kind == "code":
-            _code(doc, block)
 
-    _request_field_update(doc)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(output)
-    return output
+class DocxRenderer:
+    def render(self, blocks: list[Block], meta: dict, base_dir: Path, output: Path) -> Path:
+        doc = Document()
+        _configure_styles(doc)
+        _configure_page(doc)
+        _page_number_footer(doc)
+        if meta.get("title_page", True):
+            _title_page(doc, meta)
+        if meta.get("toc", True):
+            _toc(doc)
+        for block in blocks:
+            self._render_block(doc, block, base_dir)
+        _request_field_update(doc)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        doc.save(output)
+        return output
+
+    @staticmethod
+    def _render_block(doc: Document, block: Block, base_dir: Path) -> None:
+        handlers = {
+            Kind.HEADING: lambda: _heading(doc, block),
+            Kind.PARAGRAPH: lambda: _body(doc, block.text),
+            Kind.LIST: lambda: _list(doc, block),
+            Kind.FIGURE: lambda: _figure(doc, block, base_dir),
+            Kind.TABLE: lambda: _table(doc, block),
+            Kind.CODE: lambda: _code(doc, block),
+        }
+        handlers[block.kind]()

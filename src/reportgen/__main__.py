@@ -1,3 +1,3 @@
-from reportgen.cli import main
+from reportgen.interface.cli import main
 
 raise SystemExit(main())
