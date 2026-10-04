@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from reportgen.application.write_report import ReportWriter
@@ -19,6 +20,13 @@ def reference_library(explicit: str | None = None) -> FolderReferenceLibrary | N
     candidate = explicit or os.environ.get(REFERENCE_ENV)
     folder = Path(candidate) if candidate else home() / DEFAULT_REFERENCE_DIR
     return FolderReferenceLibrary(folder) if folder.exists() else None
+
+
+def register_reference(document: Path) -> Path:
+    """Добавляет файл в каталог эталонов, чтобы новые тексты не повторяли его дословно."""
+    folder = home() / DEFAULT_REFERENCE_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    return Path(shutil.copy2(document, folder / document.name))
 
 
 def renderers() -> dict:

@@ -39,7 +39,10 @@ def mark_done() -> None:
 def _ask(question: str, default: str = "") -> str:
     if not sys.stdin.isatty():
         return default
-    answer = input(f"{question} ").strip()
+    try:
+        answer = input(f"{question} ").strip()
+    except EOFError:
+        return default
     return answer or default
 
 

@@ -131,7 +131,9 @@ def cmd_lab(args) -> int:
 
 
 def cmd_from_sample(args) -> int:
-    structure = structure_from_outline(read_outline(Path(args.sample)))
+    sample = Path(args.sample)
+    structure = structure_from_outline(read_outline(sample))
+    container.register_reference(sample)
     target = FileProjectRepository(Path(args.project)).custom_structure_path()
     target.write_text(yaml.safe_dump(structure.to_dict(), allow_unicode=True, sort_keys=False), encoding="utf-8")
     print(f"Структура извлечена: {len(structure.sections)} разделов → {target}")
