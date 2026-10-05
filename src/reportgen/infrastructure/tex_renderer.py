@@ -6,6 +6,7 @@ from pathlib import Path
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
+from reportgen.domain.title_page import BLANK, CENTER, FIELD, build_title_page
 from reportgen.infrastructure.safe_paths import resolve_inside
 
 SPECIAL = {
@@ -85,34 +86,20 @@ def inline(text: str) -> str:
     return "".join(out)
 
 
+def _title_line(line) -> str:
+    if line.kind == BLANK:
+        return r"\vspace{\baselineskip}"
+    text = inline(line.text)
+    if line.kind == CENTER:
+        return (r"\textbf{%s}" % text if line.bold else text) + r"\par"
+    if line.kind == FIELD:
+        return r"\noindent %s\hspace{1em}%s\par" % (inline(line.label), text)
+    return r"\noindent %s\hfill %s\par" % (inline(line.label), text)
+
+
 def _title_page(meta: dict) -> str:
-    lines = [r"\begin{titlepage}", r"\centering"]
-
-    def row(text: str, bold: bool = False, gap: int = 0) -> None:
-        if not text:
-            return
-        body = inline(text)
-        lines.append((r"\textbf{%s}" % body if bold else body) + r"\par")
-        if gap:
-            lines.append(r"\vspace{%d\baselineskip}" % gap)
-
-    row(meta.get("ministry", "Министерство образования Республики Беларусь"))
-    row(meta.get("university", "Учреждение образования «Белорусский государственный университет информатики и радиоэлектроники»"), gap=1)
-    row(meta.get("faculty", ""))
-    row(meta.get("department", ""), gap=3)
-    row(meta.get("work_type", "ПОЯСНИТЕЛЬНАЯ ЗАПИСКА"), bold=True)
-    if meta.get("discipline"):
-        row(f"по дисциплине «{meta['discipline']}»", gap=1)
-    row(f"Тема: {meta.get('title', '')}", bold=True, gap=4)
-    lines.append(r"\begin{flushright}\begin{minipage}{0.5\textwidth}\raggedright")
-    for label, key in (("Студент гр. ", "group"), ("Выполнил: ", "student"), ("Руководитель: ", "supervisor")):
-        if meta.get(key):
-            lines.append(inline(f"{label}{meta[key]}") + r"\par")
-    lines.append(r"\end{minipage}\end{flushright}")
-    lines.append(r"\vfill")
-    lines.append(inline(f"{meta.get('city', 'Минск')} {meta.get('year', '')}"))
-    lines.append(r"\end{titlepage}")
-    return "\n".join(lines)
+    body = "\n".join(_title_line(line) for line in build_title_page(meta))
+    return "\\begin{titlepage}\n\\centering\n" + body + "\n\\end{titlepage}"
 
 
 def _heading(block: Block) -> str:

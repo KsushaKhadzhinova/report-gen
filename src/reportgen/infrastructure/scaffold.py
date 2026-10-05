@@ -7,22 +7,21 @@ import yaml
 WORK_FOLDERS = ("content", "screenshots", "diagrams", "output")
 
 META_DEFAULTS = {
-    "ministry": "Министерство образования Республики Беларусь",
-    "university": "Учреждение образования «Белорусский государственный университет информатики и радиоэлектроники»",
+    "document_type": "ПОЯСНИТЕЛЬНАЯ ЗАПИСКА",
+    "work_kind": "к курсовому проекту",
+    "title": "",
+    "discipline": "",
+    "document_code": "",
+    "student": "",
+    "supervisor": "",
     "faculty": "",
     "department": "",
-    "work_type": "ПОЯСНИТЕЛЬНАЯ ЗАПИСКА",
-    "discipline": "",
-    "title": "",
-    "student": "",
-    "group": "",
-    "supervisor": "",
     "city": "Минск",
     "year": "",
     "title_page": True,
     "toc": True,
 }
-LAB_OVERRIDES = {"work_type": "ОТЧЁТ ПО ЛАБОРАТОРНОЙ РАБОТЕ", "toc": False}
+LAB_OVERRIDES = {"document_type": "ОТЧЁТ", "work_kind": "по лабораторной работе", "toc": False}
 
 BRIEF_TEMPLATE = """# Сведения о работе
 

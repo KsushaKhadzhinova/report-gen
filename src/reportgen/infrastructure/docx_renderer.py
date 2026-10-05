@@ -5,7 +5,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
@@ -13,11 +13,13 @@ from PIL import Image
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
+from reportgen.domain.title_page import CENTER, FIELD, SIGNATURE, build_title_page
 from reportgen.infrastructure.safe_paths import resolve_inside
 
 INLINE_RE = re.compile(r"(`[^`]+`|\*[^*]+\*)")
 FIGURE_MAX_WIDTH_CM = 15.5
 FIGURE_MAX_HEIGHT_CM = 20.0
+TITLE_FIELD_TAB_CM = 3.5
 
 
 def _configure_styles(doc: Document) -> None:
@@ -206,31 +208,19 @@ def _code(doc: Document, block: Block) -> None:
 
 
 def _title_page(doc: Document, meta: dict) -> None:
-    def centered(text: str, bold: bool = False, blanks_after: int = 0) -> None:
+    text_width = Mm(210 - standard.MARGIN_LEFT_MM - standard.MARGIN_RIGHT_MM)
+    for line in build_title_page(meta):
         paragraph = doc.add_paragraph()
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = paragraph.add_run(text)
-        run.bold = bold
-        for _ in range(blanks_after):
-            _blank(doc)
-
-    centered(meta.get("ministry", "Министерство образования Республики Беларусь"))
-    centered(meta.get("university", "Учреждение образования «Белорусский государственный университет информатики и радиоэлектроники»"), blanks_after=1)
-    centered(meta.get("faculty", ""))
-    centered(meta.get("department", ""), blanks_after=3)
-    centered(meta.get("work_type", "ПОЯСНИТЕЛЬНАЯ ЗАПИСКА"), bold=True)
-    if meta.get("discipline"):
-        centered(f"по дисциплине «{meta['discipline']}»", blanks_after=1)
-    centered(f"Тема: {meta.get('title', '')}", bold=True, blanks_after=4)
-
-    for label, key in (("Студент гр. ", "group"), ("Выполнил: ", "student"), ("Руководитель: ", "supervisor")):
-        if meta.get(key):
-            paragraph = doc.add_paragraph()
-            paragraph.paragraph_format.left_indent = Cm(8)
-            paragraph.add_run(f"{label}{meta[key]}")
-    for _ in range(6):
-        _blank(doc)
-    centered(f"{meta.get('city', 'Минск')} {meta.get('year', '')}")
+        paragraph.paragraph_format.keep_together = True
+        if line.kind == CENTER:
+            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.add_run(line.text).bold = line.bold
+        elif line.kind == FIELD:
+            paragraph.paragraph_format.tab_stops.add_tab_stop(Cm(TITLE_FIELD_TAB_CM))
+            paragraph.add_run(f"{line.label}\t{line.text}" if not line.label.endswith(":") else f"{line.label} {line.text}")
+        elif line.kind == SIGNATURE:
+            paragraph.paragraph_format.tab_stops.add_tab_stop(text_width, WD_TAB_ALIGNMENT.RIGHT)
+            paragraph.add_run(f"{line.label}\t{line.text}")
     doc.add_page_break()
 
 

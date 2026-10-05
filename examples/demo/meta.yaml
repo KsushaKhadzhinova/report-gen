@@ -1,15 +1,13 @@
-ministry: Министерство образования Республики Беларусь
-university: Учреждение образования «Белорусский государственный университет информатики
-  и радиоэлектроники»
+document_type: ПОЯСНИТЕЛЬНАЯ ЗАПИСКА
+work_kind: к курсовому проекту
+title: Демонстрационная работа
+discipline: Название дисциплины
+document_code: ''
+student: ''
+supervisor: ''
 faculty: ''
 department: ''
-work_type: ПОЯСНИТЕЛЬНАЯ ЗАПИСКА
-discipline: ''
-title: Демонстрационная работа
-student: ''
-group: ''
-supervisor: ''
 city: Минск
-year: ''
+year: '2026'
 title_page: true
 toc: true

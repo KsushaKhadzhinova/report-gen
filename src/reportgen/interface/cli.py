@@ -125,9 +125,10 @@ def _saved_profile() -> PersonalProfile | None:
 
 def _ask_profile() -> PersonalProfile:
     return PersonalProfile(
-        student=input("ФИО: ").strip(),
-        group=input("Группа: ").strip(),
-        supervisor=input("Руководитель: ").strip(),
+        student=input("Студент (И.О. Фамилия): ").strip(),
+        supervisor=input("Руководитель (И.О. Фамилия): ").strip(),
+        faculty=input("Факультет: ").strip(),
+        department=input("Кафедра: ").strip(),
     )
 
 

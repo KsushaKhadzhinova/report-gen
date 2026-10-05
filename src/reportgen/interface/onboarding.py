@@ -91,11 +91,18 @@ def _enter_profile() -> None:
     if store.load() is not None:
         return
     print("\nШаг 3. Данные для титульного листа. Они хранятся только на этом компьютере и в git не попадают.")
-    print("Можно пропустить (Enter): тогда на титульном листе останутся заглушки <ФИО студента>, <группа>, <руководитель>.")
-    student = _ask("ФИО:")
+    print("Можно пропустить (Enter): тогда на титульном листе останутся заглушки <И.О. Фамилия студента>, <факультет>, <кафедра>.")
+    student = _ask("Студент (И.О. Фамилия):")
     if not student:
         return
-    store.save(PersonalProfile(student=student, group=_ask("Группа:"), supervisor=_ask("Руководитель:")))
+    store.save(
+        PersonalProfile(
+            student=student,
+            supervisor=_ask("Руководитель (И.О. Фамилия):"),
+            faculty=_ask("Факультет:"),
+            department=_ask("Кафедра:"),
+        )
+    )
 
 
 def run() -> None:
