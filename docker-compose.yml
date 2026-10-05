@@ -1,22 +1,33 @@
+x-report-gen: &report-gen
+  image: report-gen:latest
+  working_dir: /work
+  user: "${REPORTGEN_UID:-1000}:${REPORTGEN_GID:-1000}"
+  security_opt:
+    - no-new-privileges:true
+  volumes:
+    - ./:/work
+    - ${REPORTGEN_CODE_DIR:-./projects}:/code:ro
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    REPORTGEN_HOME: /work/workspace
+    REPORTGEN_PROJECTS: /work/projects
+    OLLAMA_BASE_URL: http://ollama:11434/v1
+
 services:
   report-gen:
+    <<: *report-gen
     build: .
-    image: report-gen:latest
     stdin_open: true
     tty: true
-    working_dir: /work
-    user: "${REPORTGEN_UID:-1000}:${REPORTGEN_GID:-1000}"
-    security_opt:
-      - no-new-privileges:true
-    volumes:
-      - ./:/work
-      - ${REPORTGEN_CODE_DIR:-./projects}:/code:ro
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      REPORTGEN_HOME: /work/workspace
-      OLLAMA_BASE_URL: http://ollama:11434/v1
+
+  ui:
+    <<: *report-gen
+    profiles: ["ui"]
+    command: ["ui", "--host", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:8765:8765"
 
   ollama:
     image: ollama/ollama:latest
@@ -24,7 +35,7 @@ services:
     volumes:
       - ollama-models:/root/.ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
 
 volumes:
   ollama-models:

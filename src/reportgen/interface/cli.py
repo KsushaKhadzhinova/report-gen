@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from reportgen.interface import container, doctor, onboarding
 
 EXIT_OK, EXIT_PROBLEMS, EXIT_USAGE = 0, 1, 2
 SETUP_COMMANDS = {"start", "doctor"}
+NONINTERACTIVE_ENV = "REPORTGEN_NONINTERACTIVE"
 
 
 def _mark(ok: bool) -> str:
@@ -170,6 +172,13 @@ def cmd_stp(args) -> int:
         return EXIT_USAGE
     for line in source.excerpts(args.value, limit=5):
         print(f"{line}\n")
+    return EXIT_OK
+
+
+def cmd_ui(args) -> int:
+    from reportgen.interface import web
+
+    web.serve(args.host, args.port)
     return EXIT_OK
 
 
@@ -326,6 +335,9 @@ def build_parser() -> argparse.ArgumentParser:
     stp = add("stp", cmd_stp, "Индекс вашего стандарта: ingest <pdf> или ask <вопрос>")
     stp.add_argument("action", choices=["ingest", "ask"])
     stp.add_argument("value")
+    ui = add("ui", cmd_ui, "Веб-интерфейс с кнопками на этом компьютере")
+    ui.add_argument("--host", default="127.0.0.1")
+    ui.add_argument("--port", type=int, default=8765)
     init = add("init", cmd_init, "Создать папку работы")
     init.add_argument("directory")
     init.add_argument("--type", choices=["coursework", "lab"], default="coursework")
@@ -370,7 +382,7 @@ def main(argv: list[str] | None = None) -> int:
     settings.load_env()
     parser = build_parser()
     args = parser.parse_args(argv)
-    interactive = sys.stdin.isatty()
+    interactive = sys.stdin.isatty() and not os.environ.get(NONINTERACTIVE_ENV)
     if not args.command:
         if onboarding.is_first_run():
             onboarding.run()

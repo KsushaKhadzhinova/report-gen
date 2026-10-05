@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>report-gen</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#5b6475; --line:#dde1e8; --accent:#2457d6; --ok:#17803d; --bad:#b42318; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12151c; --card:#1b2030; --text:#e8ebf2; --muted:#9aa4b8; --line:#2b3347; --accent:#6c93ff; --ok:#4cc27a; --bad:#ff7a70; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:960px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.lead { margin:0 0 20px; color:var(--muted); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:16px; }
+  h2 { font-size:16px; margin:0 0 12px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text); font:inherit; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+  button { padding:9px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:8px; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); }
+  button:disabled { opacity:.5; cursor:progress; }
+  pre { margin:12px 0 0; padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:8px; max-height:340px; overflow:auto; white-space:pre-wrap; font:13px/1.45 ui-monospace, Consolas, monospace; }
+  .status { font-size:13px; color:var(--muted); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  ul { margin:8px 0 0; padding-left:18px; }
+  a { color:var(--accent); }
+  .hint { font-size:13px; color:var(--muted); margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>report-gen</h1>
+  <p class="lead">Записки и отчёты по стандарту предприятия: DOCX, LaTeX и PDF. Страница работает только на этом компьютере.</p>
+
+  <section>
+    <h2>Работа</h2>
+    <div class="row">
+      <div><label for="project">Выберите работу</label><select id="project"></select></div>
+      <div><label for="code">Папка с кодом проекта (необязательно)</label><input id="code" placeholder="/code/мой-проект"></div>
+    </div>
+    <div class="buttons">
+      <button data-action="shots" class="secondary">Снять скриншоты</button>
+      <button data-action="make">Написать и собрать</button>
+      <button data-action="lint" class="secondary">Проверить по стандарту</button>
+      <button data-action="build" class="secondary">Только собрать файлы</button>
+    </div>
+    <div id="downloads" class="hint"></div>
+  </section>
+
+  <section>
+    <h2>Новая работа</h2>
+    <div class="row">
+      <div><label for="new-name">Название папки</label><input id="new-name" placeholder="kursach"></div>
+      <div><label for="new-title">Тема работы</label><input id="new-title" placeholder="Тема работы"></div>
+      <div><label for="new-type">Вид</label><select id="new-type"><option value="coursework">Курсовой проект</option><option value="lab">Лабораторная</option></select></div>
+    </div>
+    <div class="buttons"><button data-action="init">Создать</button></div>
+  </section>
+
+  <section>
+    <h2>Модель и ключи</h2>
+    <div class="row">
+      <div><label for="provider">Провайдер моделей</label><select id="provider"><option value="cloud">cloud (OpenRouter)</option><option value="gemini">gemini (Google)</option><option value="local">local (Ollama)</option><option value="custom">custom</option></select></div>
+    </div>
+    <ul id="keys"></ul>
+    <p class="hint">Ключи здесь не вводятся: выполните <code>report-gen key set cloud</code> или впишите ключ в файл <code>.env</code>. Подробности в README.</p>
+    <div class="buttons">
+      <button data-action="use" class="secondary">Выбрать провайдера</button>
+      <button data-action="models" class="secondary">Проверить модели</button>
+      <button data-action="doctor" class="secondary">Проверить окружение</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Данные для титульного листа</h2>
+    <div class="row">
+      <div><label for="p-student">Студент (И.О. Фамилия)</label><input id="p-student"></div>
+      <div><label for="p-supervisor">Руководитель (И.О. Фамилия)</label><input id="p-supervisor"></div>
+      <div><label for="p-faculty">Факультет</label><input id="p-faculty"></div>
+      <div><label for="p-department">Кафедра</label><input id="p-department"></div>
+    </div>
+    <p class="hint">Сохраняются только на этом компьютере и в git не попадают. Пока поля пусты, на титульном листе стоят заглушки.</p>
+    <div class="buttons"><button data-action="profile" class="secondary">Сохранить данные</button></div>
+  </section>
+
+  <section>
+    <h2>Ход выполнения <span id="status" class="status"></span></h2>
+    <pre id="log">Выберите действие.</pre>
+  </section>
+</main>
+<script>
+const TOKEN = "{{TOKEN}}";
+const $ = (id) => document.getElementById(id);
+let busy = false;
+
+async function api(path, options = {}) {
+  const response = await fetch(path, { ...options, headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN } });
+  return response.json();
+}
+
+function setBusy(value) {
+  busy = value;
+  document.querySelectorAll("button").forEach((b) => (b.disabled = value));
+}
+
+async function refresh() {
+  const state = await api("/api/state");
+  $("project").innerHTML = state.projects.map((p) => `<option value="${p.name}">${p.name}</option>`).join("") || "<option value=''>— пока нет работ —</option>";
+  $("provider").value = state.provider;
+  $("keys").innerHTML = state.keys.map((k) => `<li>${k.provider}: <span class="${k.set ? "ok" : "bad"}">${k.set ? "ключ задан" : "ключ не задан"}</span></li>`).join("");
+  showDownloads(state);
+}
+
+function showDownloads(state) {
+  const project = state.projects.find((p) => p.name === $("project").value);
+  const names = { docx: "DOCX", tex: "TeX", pdf: "PDF" };
+  $("downloads").innerHTML = project && project.files.length
+    ? "Готовые файлы: " + project.files.map((f) => `<a href="/download?project=${encodeURIComponent(project.name)}&file=${f}">${names[f]}</a>`).join(" · ")
+    : "";
+}
+
+function payload(action) {
+  const body = { action, project: $("project").value, code: $("code").value.trim() };
+  if (action === "init") Object.assign(body, { name: $("new-name").value.trim(), title: $("new-title").value.trim(), type: $("new-type").value });
+  if (action === "use") body.provider = $("provider").value;
+  if (action === "profile") Object.assign(body, { student: $("p-student").value, supervisor: $("p-supervisor").value, faculty: $("p-faculty").value, department: $("p-department").value });
+  return body;
+}
+
+async function run(action) {
+  if (busy) return;
+  setBusy(true);
+  $("status").textContent = "выполняется…";
+  $("log").textContent = "";
+  const started = await api("/api/run", { method: "POST", body: JSON.stringify(payload(action)) });
+  if (started.error) { $("log").textContent = started.error; $("status").textContent = ""; setBusy(false); return; }
+  const timer = setInterval(async () => {
+    const job = await api("/api/job?id=" + started.id);
+    $("log").textContent = job.output;
+    $("log").scrollTop = $("log").scrollHeight;
+    if (job.status !== "running") {
+      clearInterval(timer);
+      $("status").innerHTML = job.status === "done" ? '<span class="ok">готово</span>' : '<span class="bad">есть замечания или ошибка</span>';
+      setBusy(false);
+      refresh();
+    }
+  }, 1500);
+}
+
+document.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => run(b.dataset.action)));
+$("project").addEventListener("change", refresh);
+refresh();
+</script>
+</body>
+</html>
