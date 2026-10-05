@@ -12,6 +12,7 @@ class PromptCatalog:
     system: str
     section: str
     rewrite: str
+    revise: str
     review: str
     gap_fill: str
     standard_rules: str
@@ -38,6 +39,9 @@ class PromptCatalog:
 
     def rewrite_prompt(self, paragraph: str) -> str:
         return self.rewrite.format(paragraph=paragraph)
+
+    def revise_prompt(self, title: str, issues: list[str], body: str, facts: str) -> str:
+        return self.revise.format(title=title, issues="\n".join(f"- {issue}" for issue in issues), body=body, facts=facts or "(сведений нет)")
 
     def review_prompt(self, remarks: str, document: str) -> str:
         return self.review.format(remarks=remarks, document=document)

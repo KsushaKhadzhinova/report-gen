@@ -8,11 +8,15 @@ from typing import Callable
 
 from reportgen.application.ports import LanguageModel, ProjectRepository, ReferenceLibrary, StandardSource, StyleStore
 from reportgen.domain import overlap
+from reportgen.domain.lint_rules import Issue, check_blocks
 from reportgen.domain.prompts import PromptCatalog
 from reportgen.domain.structure import Section, Structure
 from reportgen.domain.style_profile import style_hints
 
 MAX_REWRITE_PASSES = 2
+MAX_REFINE_ROUNDS = 2
+FIGURE_TOKEN_RE = re.compile(r"\{fig:([\w\-]+)\}")
+FIGURE_LINE_PREFIX = "!["
 SECTION_MAX_TOKENS = 6000
 REWRITE_TEMPERATURE = 0.9
 MARKUP_RE = re.compile(r"^(#+\s*|>\s*)|(\*\*|__)", re.MULTILINE)
@@ -75,6 +79,48 @@ class ReportWriter:
             status[section.id] = self._write_one(section, repository, context, figures, force)
             progress(f"  {section.id}: {status[section.id]}")
         return status
+
+    def refine(
+        self,
+        structure: Structure,
+        repository: ProjectRepository,
+        context: WritingContext,
+        rounds: int = MAX_REFINE_ROUNDS,
+        progress: Progress = print,
+    ) -> list[Issue]:
+        """Проверяет текст и просит модель исправить только разделы с замечаниями; возвращает оставшиеся замечания."""
+        sections = {section.id: section for section in structure.sections}
+        for round_number in range(1, rounds + 1):
+            by_section = self._issues_by_section(check_blocks(repository.load_blocks()), sections)
+            if not by_section:
+                break
+            for section_id, messages in by_section.items():
+                progress(f"  исправление {section_id} (раунд {round_number}): замечаний {len(messages)}")
+                self._revise(sections[section_id], repository, context, messages)
+        return check_blocks(repository.load_blocks())
+
+    @staticmethod
+    def _issues_by_section(issues: list[Issue], sections: dict[str, Section]) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for issue in issues:
+            section_id = issue.where.removesuffix(".md")
+            if section_id in sections and not sections[section_id].is_references:
+                grouped.setdefault(section_id, []).append(issue.message)
+        return grouped
+
+    def _revise(self, section: Section, repository: ProjectRepository, context: WritingContext, messages: list[str]) -> None:
+        lines = repository.read_section(section.id).splitlines()
+        figure_lines = [line for line in lines if line.startswith(FIGURE_LINE_PREFIX)]
+        body = "\n".join(line for line in lines[1:] if not line.startswith(FIGURE_LINE_PREFIX)).strip()
+        try:
+            reply = self.model.complete(
+                "writer", self._system_prompt(), self.prompts.revise_prompt(section.title, messages, body, context.facts), max_tokens=SECTION_MAX_TOKENS
+            )
+        except RuntimeError:  # модель недоступна: прежний текст остаётся, ошибка видна в оставшихся замечаниях проверки
+            return
+        revised = self._ensure_figure_references(clean_model_output(reply), FIGURE_TOKEN_RE.findall(body))
+        parts = [heading_line(section), "", revised] + ([""] + ["\n\n".join(figure_lines)] if figure_lines else [])
+        repository.save_section(section.id, "\n".join(parts) + "\n")
 
     def _system_prompt(self) -> str:
         return self.prompts.system_prompt(style_hints(self.style_store.load()))

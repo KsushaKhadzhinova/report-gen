@@ -217,7 +217,14 @@ def cmd_shots(args) -> int:
 def _write(args, builtin: str, task: str = "") -> int:
     repository = FileProjectRepository(Path(args.project))
     writer = container.report_writer(args.reference)
-    writer.write(_structure(repository, builtin), repository, _context(repository, args.code, task), args.section, args.force)
+    structure = _structure(repository, builtin)
+    context = _context(repository, args.code, task)
+    writer.write(structure, repository, context, args.section, args.force)
+    if args.rounds > 0 and not args.section:
+        print("Проверка и исправление:")
+        remaining = writer.refine(structure, repository, context, args.rounds)
+        for issue in remaining:
+            print(f"  осталось: {issue}")
     return EXIT_OK
 
 
@@ -309,6 +316,7 @@ def _add_work_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--section")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--reference")
+    parser.add_argument("--rounds", type=int, default=2, help="раундов автоисправления по замечаниям проверки (0 отключает)")
 
 
 def build_parser() -> argparse.ArgumentParser:

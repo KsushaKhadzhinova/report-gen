@@ -53,6 +53,9 @@ class FileProjectRepository:
     def section_exists(self, section_id: str) -> bool:
         return self._section_path(section_id).is_file()
 
+    def read_section(self, section_id: str) -> str:
+        return self._section_path(section_id).read_text(encoding="utf-8")
+
     def save_section(self, section_id: str, markdown: str) -> None:
         self.content_dir.mkdir(exist_ok=True)
         self._section_path(section_id).write_text(markdown, encoding="utf-8")
