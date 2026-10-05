@@ -31,6 +31,7 @@ from reportgen.infrastructure.scaffold import scaffold_project
 from reportgen.infrastructure.screen_capture import CaptureError, capture_project
 from reportgen.infrastructure.secret_store import KeyringSecretStore, SecretStoreUnavailable, migrate_env_file
 from reportgen.infrastructure.settings import read_data
+from reportgen.infrastructure.standard_store import FileStandardStore
 from reportgen.interface import container, doctor, onboarding
 
 EXIT_OK, EXIT_PROBLEMS, EXIT_USAGE = 0, 1, 2
@@ -153,6 +154,21 @@ def cmd_profile(args) -> int:
     else:
         profile = store.load()
         print("Данные не заданы: report-gen profile set" if profile is None else yaml.safe_dump(profile.to_dict(), allow_unicode=True))
+    return EXIT_OK
+
+
+def cmd_stp(args) -> int:
+    store = FileStandardStore()
+    if args.action == "ingest":
+        index = store.ingest(Path(args.value))
+        print(f"Пунктов стандарта в локальном индексе: {len(index.clauses)}. Текст остаётся на этом компьютере.")
+        return EXIT_OK
+    source = store.source()
+    if source is None:
+        print("Индекс не создан: report-gen stp ingest <путь к PDF стандарта>")
+        return EXIT_USAGE
+    for line in source.excerpts(args.value, limit=5):
+        print(f"{line}\n")
     return EXIT_OK
 
 
@@ -306,6 +322,9 @@ def build_parser() -> argparse.ArgumentParser:
     key.add_argument("provider", nargs="?")
     profile = add("profile", cmd_profile, "Личные данные для титульного листа (хранятся только на этом компьютере)")
     profile.add_argument("action", choices=["set", "show", "export", "import"])
+    stp = add("stp", cmd_stp, "Индекс вашего стандарта: ingest <pdf> или ask <вопрос>")
+    stp.add_argument("action", choices=["ingest", "ask"])
+    stp.add_argument("value")
     init = add("init", cmd_init, "Создать папку работы")
     init.add_argument("directory")
     init.add_argument("--type", choices=["coursework", "lab"], default="coursework")

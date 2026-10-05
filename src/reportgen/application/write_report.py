@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from reportgen.application.ports import LanguageModel, ProjectRepository, ReferenceLibrary, StyleStore
+from reportgen.application.ports import LanguageModel, ProjectRepository, ReferenceLibrary, StandardSource, StyleStore
 from reportgen.domain import overlap
 from reportgen.domain.prompts import PromptCatalog
 from reportgen.domain.structure import Section, Structure
@@ -50,11 +50,13 @@ class ReportWriter:
         style_store: StyleStore,
         prompts: PromptCatalog,
         references: ReferenceLibrary | None = None,
+        standard: StandardSource | None = None,
     ) -> None:
         self.model = model
         self.style_store = style_store
         self.prompts = prompts
         self.references = references
+        self.standard = standard
 
     def write(
         self,
@@ -114,8 +116,16 @@ class ReportWriter:
         return "\n".join(parts) + "\n", rewritten
 
     def _ask_for_body(self, section: Section, context: WritingContext, figures: dict[str, str], available: list[str]) -> str:
-        prompt = self.prompts.section_prompt(section, context.facts, context.task, self._figure_rule(figures, available))
+        prompt = self.prompts.section_prompt(
+            section, context.facts, context.task, self._figure_rule(figures, available), self._standard_excerpts(section)
+        )
         return self.model.complete("writer", self._system_prompt(), prompt, max_tokens=SECTION_MAX_TOKENS)
+
+    def _standard_excerpts(self, section: Section) -> str:
+        if self.standard is None:
+            return ""
+        query = f"{section.title} {section.guide} {self.prompts.section_rules.get(section.rules, '')}"
+        return "\n".join(self.standard.excerpts(query))
 
     @staticmethod
     def _figure_rule(figures: dict[str, str], available: list[str]) -> str:
@@ -175,6 +185,7 @@ class ReportWriter:
                 "figures": figures,
                 "prompt": self._system_prompt(),
                 "template": self.prompts.section,
+                "standard": self._standard_excerpts(section),
                 "model": self.model.identity,
             },
             ensure_ascii=False,

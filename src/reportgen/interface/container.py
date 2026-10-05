@@ -10,6 +10,7 @@ from reportgen.infrastructure.file_stores import FileStyleStore, FolderReference
 from reportgen.infrastructure.llm_client import OpenAICompatibleModel
 from reportgen.infrastructure.prompt_library import load_prompt_catalog
 from reportgen.infrastructure.settings import home
+from reportgen.infrastructure.standard_store import FileStandardStore
 from reportgen.infrastructure.tex_renderer import TexRenderer
 
 REFERENCE_ENV = "REPORTGEN_REFERENCE"
@@ -35,4 +36,6 @@ def renderers() -> dict:
 
 
 def report_writer(explicit_reference: str | None = None) -> ReportWriter:
-    return ReportWriter(OpenAICompatibleModel(), FileStyleStore(), load_prompt_catalog(), reference_library(explicit_reference))
+    return ReportWriter(
+        OpenAICompatibleModel(), FileStyleStore(), load_prompt_catalog(), reference_library(explicit_reference), FileStandardStore().source()
+    )

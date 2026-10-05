@@ -24,13 +24,14 @@ class PromptCatalog:
             parts.append(style_hints)
         return "\n\n".join(parts)
 
-    def section_prompt(self, section: Section, facts: str, task: str, figure_rule: str) -> str:
+    def section_prompt(self, section: Section, facts: str, task: str, figure_rule: str, standard_excerpts: str = "") -> str:
         return self.section.format(
             title=section.title,
             guide=section.guide,
             words=section.words,
             section_rules=self.section_rules.get(section.rules, "").strip(),
             figure_rule=figure_rule,
+            standard_excerpts=standard_excerpts or "(индекс стандарта не подключён)",
             task=f"\nЗадание:\n{task}\n" if task else "",
             facts=facts or "Сведений нет: пиши общим научно-техническим текстом без конкретных названий и ставь метки [УТОЧНИТЬ: …].",
         )

@@ -87,3 +87,8 @@ class FormatService(Protocol):
     def fix(self, source: Path, output: Path) -> int: ...
 
     def open_text(self, path: Path) -> EditableText: ...
+
+
+class StandardSource(Protocol):
+    def excerpts(self, query: str, limit: int = 4) -> list[str]:
+        """Выдержки из пунктов стандарта, наиболее подходящие к запросу."""
