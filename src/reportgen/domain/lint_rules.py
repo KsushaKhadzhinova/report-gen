@@ -9,6 +9,14 @@ from reportgen.domain.blocks import Block, Kind
 FIRST_PERSON_RE = re.compile(r"(?<![а-яё])(я|мы|наш\w*|мой|моя)(?![а-яё])", re.IGNORECASE)
 PLACEHOLDER_RE = re.compile(r"TODO|\[нет файла|\[УТОЧНИТЬ|\?\?|lorem ipsum", re.IGNORECASE)
 EXCERPT_LENGTH = 60
+WORDS_PER_PAGE = 300
+INTRODUCTION_MAX_WORDS = 2 * WORDS_PER_PAGE
+CONCLUSION_MAX_WORDS = 2 * WORDS_PER_PAGE + WORDS_PER_PAGE // 4
+CITATION_RE = re.compile(r"\[(\d+)\]")
+PERIOD_BEFORE_CITATION_RE = re.compile(r"\.\s*\[\d+\]")
+PREPOSITION_BEFORE_UNIT_RE = re.compile(r"\bв\s+\d+(?:,\d+)?\s*(?:Вт|кВт|В|А|Гц|кг|мм|см|км|м|с|мс|%)(?![а-яёА-ЯЁ])")
+LONG_DASH = "\u2014"
+WIKIPEDIA_RE = re.compile(r"wikipedia|википеди", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -62,6 +70,12 @@ def _check_paragraph(block: Block) -> list[Issue]:
         issues.append(_warning(block.source, f"Двойной пробел или «---»: {_excerpt(block.text)}"))
     if PLACEHOLDER_RE.search(block.text):
         issues.append(_error(block.source, f"Заглушка в тексте: {_excerpt(block.text)}"))
+    if PREPOSITION_BEFORE_UNIT_RE.search(block.text):
+        issues.append(_warning(block.source, f"Перед числом с единицей не ставят «в»: {_excerpt(block.text)}"))
+    if PERIOD_BEFORE_CITATION_RE.search(block.text):
+        issues.append(_warning(block.source, f"Точку ставят после скобки со ссылкой: {_excerpt(block.text)}"))
+    if LONG_DASH in block.text:
+        issues.append(_warning(block.source, f"Длинное тире «—», в тексте используется короткое «–»: {_excerpt(block.text)}"))
     return issues
 
 
@@ -85,6 +99,74 @@ def _check_table(block: Block, body: str) -> list[Issue]:
     return issues
 
 
+def _sections(blocks: list[Block]) -> list[tuple[Block, list[Block]]]:
+    """Заголовки первого уровня вместе с блоками, которые им принадлежат."""
+    sections: list[tuple[Block, list[Block]]] = []
+    for block in blocks:
+        if block.kind is Kind.HEADING and block.level == 1:
+            sections.append((block, []))
+        elif sections:
+            sections[-1][1].append(block)
+    return sections
+
+
+def _word_count(blocks: list[Block]) -> int:
+    return sum(len(b.text.split()) for b in blocks if b.kind is Kind.PARAGRAPH)
+
+
+def _check_length(heading: Block, content: list[Block]) -> list[Issue]:
+    words = _word_count(content)
+    title = heading.text.upper()
+    if title == "ВВЕДЕНИЕ" and words > INTRODUCTION_MAX_WORDS:
+        return [_warning(heading.source, f"Введение около {words} слов: по стандарту не более двух страниц (около {INTRODUCTION_MAX_WORDS} слов)")]
+    if title == "ЗАКЛЮЧЕНИЕ" and words > CONCLUSION_MAX_WORDS:
+        return [_warning(heading.source, f"Заключение около {words} слов: по стандарту не более двух страниц (около {CONCLUSION_MAX_WORDS} слов)")]
+    return []
+
+
+def _reference_entries(content: list[Block]) -> list[str]:
+    return [b.text for b in content if b.kind is Kind.PARAGRAPH]
+
+
+def _check_references(blocks: list[Block], sections: list[tuple[Block, list[Block]]]) -> list[Issue]:
+    issues: list[Issue] = []
+    listing = next(((h, c) for h, c in sections if h.text.upper() == "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ"), None)
+    cited = [int(n) for b in blocks if b.kind is Kind.PARAGRAPH and not (listing and b in listing[1]) for n in CITATION_RE.findall(b.text)]
+    first_seen = list(dict.fromkeys(cited))
+    if first_seen != sorted(first_seen) or (first_seen and first_seen[0] != 1):
+        issues.append(_warning("документ", "Номера источников должны идти в порядке первых ссылок в тексте: [1], [2], [3]…"))
+    if listing is None:
+        return issues
+    heading, content = listing
+    entries = _reference_entries(content)
+    if any(WIKIPEDIA_RE.search(entry) for entry in entries):
+        issues.append(_error(heading.source, "Википедию и подобные открытые ресурсы нельзя использовать как источники"))
+    missing = sorted({n for n in cited if n > len(entries)})
+    if missing:
+        issues.append(_error(heading.source, f"В тексте есть ссылки на источники, которых нет в списке: {missing}"))
+    unused = [n for n in range(1, len(entries) + 1) if n not in cited]
+    if unused and cited:
+        issues.append(_warning(heading.source, f"Источники без ссылок в тексте: {unused}"))
+    return issues
+
+
+def _check_appendices(blocks: list[Block]) -> list[Issue]:
+    body = _body_text(blocks)
+    return [
+        _warning(block.source, f"Нет ссылки на приложение {block.number}")
+        for block in blocks
+        if block.kind is Kind.HEADING and block.appendix and not re.search(rf"приложени\w*\s+{re.escape(block.number)}", body, re.IGNORECASE)
+    ]
+
+
+def _check_document(blocks: list[Block]) -> list[Issue]:
+    sections = _sections(blocks)
+    issues: list[Issue] = []
+    for heading, content in sections:
+        issues += _check_length(heading, content)
+    return issues + _check_references(blocks, sections) + _check_appendices(blocks)
+
+
 def check_blocks(blocks: list[Block]) -> list[Issue]:
     body = _body_text(blocks)
     issues: list[Issue] = []
@@ -99,4 +181,4 @@ def check_blocks(blocks: list[Block]) -> list[Issue]:
             issues += _check_figure(block, body)
         elif block.kind is Kind.TABLE:
             issues += _check_table(block, body)
-    return issues
+    return issues + _check_document(blocks)
