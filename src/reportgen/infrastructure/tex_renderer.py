@@ -57,12 +57,11 @@ PREAMBLE = r"""\documentclass[a4paper,14pt]{extarticle}
 \setlength{\cftbeforesecskip}{0pt}
 \setlength{\cftbeforesubsecskip}{0pt}
 
-\newcommand{\chapterheading}[2]{\clearpage\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{section}{#1 #2}}
-\newcommand{\sectionheading}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{subsection}{#1 #2}}
-\newcommand{\subsectionheading}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}}
-\newcommand{\plainheading}[1]{\clearpage\begin{center}\textbf{#1}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{#1}}
-\newcommand{\appendixheading}[2]{\clearpage\begin{center}\textbf{ПРИЛОЖЕНИЕ #1}\\\textbf{#2}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{ПРИЛОЖЕНИЕ #1 #2}}
-\newcommand{\endash}{\textendash}
+\newcommand{\reportchapter}[2]{\clearpage\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{section}{#1 #2}}
+\newcommand{\reportsection}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}\addcontentsline{toc}{subsection}{#1 #2}}
+\newcommand{\reportsubsection}[2]{\noindent\hspace{\parindent}\textbf{#1 #2}\par\vspace{\baselineskip}}
+\newcommand{\reportplain}[1]{\clearpage\begin{center}\textbf{#1}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{#1}}
+\newcommand{\reportappendix}[2]{\clearpage\begin{center}\textbf{ПРИЛОЖЕНИЕ #1}\\\textbf{#2}\end{center}\vspace{\baselineskip}\addcontentsline{toc}{section}{ПРИЛОЖЕНИЕ #1 #2}}
 
 \begin{document}
 """
@@ -105,10 +104,10 @@ def _title_page(meta: dict) -> str:
 def _heading(block: Block) -> str:
     title = escape(block.text)
     if block.appendix:
-        return rf"\appendixheading{{{block.number}}}{{{title}}}"
+        return rf"\reportappendix{{{block.number}}}{{{title}}}"
     if block.level == 1 and not block.numbered:
-        return rf"\plainheading{{{title}}}"
-    command = {1: "chapterheading", 2: "sectionheading", 3: "subsectionheading"}[block.level]
+        return rf"\reportplain{{{title}}}"
+    command = {1: "reportchapter", 2: "reportsection", 3: "reportsubsection"}[block.level]
     return rf"\{command}{{{block.number}}}{{{title}}}"
 
 

@@ -44,7 +44,7 @@ def test_formatter_repairs_margins_and_indent(tmp_path: Path):
 def test_tex_output_contains_chapter_command_and_escapes(tmp_path: Path):
     tex = TexRenderer().render(sample_blocks(), {"title": "Тест"}, tmp_path, tmp_path / "tex" / "note.tex")
     text = tex.read_text(encoding="utf-8")
-    assert r"\chapterheading{1}{АНАЛИЗ}" in text
+    assert r"\reportchapter{1}{АНАЛИЗ}" in text
     assert "нет файла" in text
     assert escape("a_b & 50%") == r"a\_b \& 50\%"
 
@@ -69,3 +69,16 @@ def test_builtin_structures_are_valid_yaml():
     for name in ("coursework", "lab"):
         structure = Structure.from_dict(yaml.safe_load(read_data(f"{name}.yaml")))
         assert structure.sections and all(section.title for section in structure.sections)
+
+
+def test_every_macro_in_the_preamble_is_used_and_none_redefines_latex():
+    import re
+
+    from reportgen.infrastructure import tex_renderer
+
+    source = Path(tex_renderer.__file__).read_text(encoding="utf-8")
+    defined = re.findall(r"\\newcommand\{\\(\w+)\}", tex_renderer.PREAMBLE)
+    assert defined, "no macros found"
+    for name in defined:
+        assert source.count(name) > 1, f"macro {name} is defined but never used"
+    assert not {"endash", "emdash"} & set(defined)
