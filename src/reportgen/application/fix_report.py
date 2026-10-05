@@ -5,11 +5,13 @@ from pathlib import Path
 
 from reportgen.application.ports import FormatService, LanguageModel, ReferenceLibrary, StyleStore
 from reportgen.domain import overlap
-from reportgen.domain.style_profile import style_instruction
+from reportgen.domain.prompts import PromptCatalog
+from reportgen.domain.style_profile import style_hints
 
 MIN_REVIEWED_PARAGRAPH = 120
 REVIEW_TEXT_LIMIT = 9000
-REVIEWER_ROLE_PROMPT = "Ты редактор пояснительных записок по СТП БГУИР. Отвечай по-русски, конкретно, списком правок."
+REWRITE_TEMPERATURE = 0.9
+REVIEW_TEMPERATURE = 0.3
 
 
 @dataclass
@@ -25,11 +27,13 @@ class ReportFixer:
     def __init__(
         self,
         formatter: FormatService,
+        prompts: PromptCatalog,
         model: LanguageModel | None = None,
         style_store: StyleStore | None = None,
         references: ReferenceLibrary | None = None,
     ) -> None:
         self.formatter = formatter
+        self.prompts = prompts
         self.model = model
         self.style_store = style_store
         self.references = references
@@ -44,6 +48,10 @@ class ReportFixer:
         result.issues_after = [str(issue) for issue in self.formatter.audit(output)]
         return result
 
+    def _system_prompt(self) -> str:
+        profile = self.style_store.load() if self.style_store else None
+        return self.prompts.system_prompt(style_hints(profile))
+
     def _rewrite_overlaps(self, document_path: Path) -> int:
         text = self.formatter.open_text(document_path)
         long_paragraphs = [p for p in text.paragraphs() if len(p) > MIN_REVIEWED_PARAGRAPH]
@@ -54,20 +62,8 @@ class ReportFixer:
         return len(flagged)
 
     def _rephrase(self, paragraph: str) -> str:
-        profile = self.style_store.load() if self.style_store else None
-        return self.model.complete(
-            "rewriter",
-            style_instruction(profile),
-            "Перепиши абзац другими словами, сохранив смысл и факты. Верни только абзац.\n\n" + paragraph,
-            temperature=0.9,
-        )
+        return self.model.complete("rewriter", self._system_prompt(), self.prompts.rewrite_prompt(paragraph), temperature=REWRITE_TEMPERATURE)
 
     def _review(self, document_path: Path, remarks: str) -> str:
         body = "\n".join(self.formatter.open_text(document_path).paragraphs())[:REVIEW_TEXT_LIMIT]
-        return self.model.complete(
-            "reviewer",
-            REVIEWER_ROLE_PROMPT,
-            f"Замечания руководителя:\n{remarks}\n\nТекст записки:\n{body}\n\n"
-            "Для каждого замечания укажи, в каком месте текста оно применимо и как именно исправить.",
-            temperature=0.3,
-        )
+        return self.model.complete("reviewer", self._system_prompt(), self.prompts.review_prompt(remarks, body), temperature=REVIEW_TEMPERATURE)

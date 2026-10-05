@@ -16,6 +16,7 @@ class Section:
     guide: str = ""
     figures: tuple[str, ...] = ()
     kind: str = ""
+    rules: str = ""
 
     @property
     def is_container(self) -> bool:
@@ -33,6 +34,8 @@ class Section:
             data["figures"] = list(self.figures)
         if self.kind:
             data["kind"] = self.kind
+        if self.rules:
+            data["rules"] = self.rules
         return data
 
     @staticmethod
@@ -46,6 +49,7 @@ class Section:
             guide=(data.get("guide") or "").strip(),
             figures=tuple(data.get("figures", ())),
             kind=data.get("kind", ""),
+            rules=data.get("rules", ""),
         )
 
 

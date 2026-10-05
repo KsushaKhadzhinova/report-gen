@@ -8,6 +8,7 @@ from reportgen.application.write_report import ReportWriter
 from reportgen.infrastructure.docx_renderer import DocxRenderer
 from reportgen.infrastructure.file_stores import FileStyleStore, FolderReferenceLibrary
 from reportgen.infrastructure.llm_client import OpenAICompatibleModel
+from reportgen.infrastructure.prompt_library import load_prompt_catalog
 from reportgen.infrastructure.settings import home
 from reportgen.infrastructure.tex_renderer import TexRenderer
 
@@ -34,4 +35,4 @@ def renderers() -> dict:
 
 
 def report_writer(explicit_reference: str | None = None) -> ReportWriter:
-    return ReportWriter(OpenAICompatibleModel(), FileStyleStore(), reference_library(explicit_reference))
+    return ReportWriter(OpenAICompatibleModel(), FileStyleStore(), load_prompt_catalog(), reference_library(explicit_reference))

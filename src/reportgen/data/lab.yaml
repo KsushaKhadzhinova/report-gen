@@ -1,6 +1,7 @@
 name: Отчёт по лабораторной работе
 sections:
   - id: 01_goal
+    rules: goal
     title: Цель работы
     level: 1
     numbered: false
@@ -8,6 +9,7 @@ sections:
     guide: "Одно-два предложения: чему посвящена работа и чему нужно научиться. Опирайся на формулировку задания."
 
   - id: 02_task
+    rules: task
     title: Постановка задачи
     level: 1
     numbered: false
@@ -15,6 +17,7 @@ sections:
     guide: "Перескажи задание своими словами, перечисли подзадачи и исходные данные варианта."
 
   - id: 03_theory
+    rules: theory
     title: Теоретические сведения
     level: 1
     numbered: false
@@ -22,6 +25,7 @@ sections:
     guide: "Кратко изложи теорию, необходимую для выполнения работы: определения, формулы, алгоритмы по теме задания."
 
   - id: 04_progress
+    rules: progress
     title: Ход работы
     level: 1
     numbered: false
@@ -30,6 +34,7 @@ sections:
     guide: "Пошагово опиши выполнение: что делалось, какие инструменты, какие результаты. К шагам привязываются скриншоты."
 
   - id: 05_conclusion
+    rules: summary
     title: Выводы
     level: 1
     numbered: false

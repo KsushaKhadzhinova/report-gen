@@ -1,6 +1,7 @@
 name: Курсовой проект (пояснительная записка по СТП)
 sections:
   - id: 00_introduction
+    rules: introduction
     title: ВВЕДЕНИЕ
     level: 1
     numbered: false
@@ -14,12 +15,14 @@ sections:
     level: 1
     words: 0
   - id: 01_01_domain
+    rules: analysis
     title: Описание предметной области
     level: 2
     words: 600
     guide: >
       Сущности предметной области, их роли и связи, бизнес-процессы, проблемы, которые решает система.
   - id: 01_02_analogues
+    rules: analysis
     title: Анализ существующих решений
     level: 2
     words: 600
@@ -27,6 +30,7 @@ sections:
       Два-три реальных аналога, их сильные и слабые стороны, итоговое сравнение и вывод о том,
       что следует взять за основу. Не выдумывай названия аналогов: используй только указанные пользователем.
   - id: 01_03_specification
+    rules: analysis
     title: Постановка задачи
     level: 2
     words: 450
@@ -38,6 +42,7 @@ sections:
     level: 1
     words: 0
   - id: 02_01_database
+    rules: design
     title: Проектирование базы данных
     level: 2
     words: 700
@@ -45,6 +50,7 @@ sections:
     guide: >
       Инфологическая и даталогическая модели, описание сущностей и атрибутов, связи и мощности, нормализация, индексы.
   - id: 02_02_system
+    rules: design
     title: Проектирование архитектуры системы
     level: 2
     words: 600
@@ -57,12 +63,14 @@ sections:
     level: 1
     words: 0
   - id: 03_01_tools
+    rules: development
     title: Выбор средств реализации
     level: 2
     words: 450
     guide: >
       Языки, фреймворки, СУБД, инструменты и обоснование выбора каждого на основе стека проекта.
   - id: 03_02_database
+    rules: development
     title: Реализация базы данных
     level: 2
     words: 600
@@ -70,6 +78,7 @@ sections:
     guide: >
       Физическая схема, ключевые таблицы, ограничения целостности, индексы, пересказом, без дословного DDL.
   - id: 03_03_implementation
+    rules: development
     title: Программная реализация приложения
     level: 2
     words: 800
@@ -77,6 +86,7 @@ sections:
       Структура модулей, ключевые алгоритмы и процессы, взаимодействие слоёв, обработка ошибок и безопасность.
 
   - id: 04_manual
+    rules: manual
     title: РУКОВОДСТВО ПОЛЬЗОВАТЕЛЯ
     level: 1
     words: 600
@@ -85,6 +95,7 @@ sections:
       Сценарии работы по ролям: запуск, основные действия, результат. К каждому сценарию приводится экран.
 
   - id: 0A_conclusion
+    rules: conclusion
     title: ЗАКЛЮЧЕНИЕ
     level: 1
     numbered: false

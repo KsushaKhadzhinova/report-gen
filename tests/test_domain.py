@@ -5,7 +5,7 @@ from reportgen.domain.lint_rules import check_blocks
 from reportgen.domain.markup import parse
 from reportgen.domain.numbering import assign_numbers, resolve_figure_references
 from reportgen.domain.outline import OutlineEntry, structure_from_outline
-from reportgen.domain.style_profile import build_profile, style_instruction
+from reportgen.domain.style_profile import build_profile, style_hints
 
 SOURCE = """# ВВЕДЕНИЕ {-}
 
@@ -96,9 +96,10 @@ def test_outline_becomes_structure_without_copying_text():
     assert titles == [("ВВЕДЕНИЕ", False, 400), ("Анализ", True, 0), ("Предметная область", True, 80)]
 
 
-def test_style_profile_feeds_instruction():
+def test_style_profile_keeps_statistics_but_no_author_text():
     paragraphs = [("a.docx", "Система обеспечивает хранение данных. " * 12 + "Результат работы приведён далее.")] * 3
     profile = build_profile(paragraphs)
     assert profile.paragraphs == 3
-    assert "около" in style_instruction(profile)
-    assert style_instruction(None).startswith("Пиши на русском")
+    assert "exemplars" not in profile.to_dict()
+    assert "около" in style_hints(profile)
+    assert style_hints(None) == ""

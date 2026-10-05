@@ -25,6 +25,7 @@ from reportgen.infrastructure.latex_compiler import LatexError, XelatexCompiler
 from reportgen.infrastructure.llm_client import LLMError, OpenAICompatibleModel
 from reportgen.infrastructure.outline_reader import read_outline
 from reportgen.infrastructure.profile_vault import EXPORT_FILE, LocalProfileStore, export_encrypted, import_encrypted
+from reportgen.infrastructure.prompt_library import load_prompt_catalog
 from reportgen.infrastructure.readers import DocumentProseSource, read_paragraphs
 from reportgen.infrastructure.scaffold import scaffold_project
 from reportgen.infrastructure.screen_capture import CaptureError, capture_project
@@ -245,7 +246,7 @@ def cmd_fix(args) -> int:
     library = container.reference_library(args.reference) if args.reference else None
     remarks = Path(args.remarks).read_text(encoding="utf-8") if args.remarks else ""
     model = OpenAICompatibleModel() if (library or remarks) else None
-    result = ReportFixer(DocxFormatService(), model, FileStyleStore(), library).fix(source, output, remarks)
+    result = ReportFixer(DocxFormatService(), load_prompt_catalog(), model, FileStyleStore(), library).fix(source, output, remarks)
     if result.review:
         output.with_suffix(".review.md").write_text(result.review, encoding="utf-8")
     summary = {k: v for k, v in result.__dict__.items() if k != "review"}

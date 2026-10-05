@@ -8,6 +8,7 @@ from reportgen.application.write_report import ReportWriter, WritingContext
 from reportgen.domain.markup import parse
 from reportgen.domain.overlap import index_references
 from reportgen.domain.structure import Section, Structure
+from reportgen.infrastructure.prompt_library import load_prompt_catalog
 
 
 class FakeModel:
@@ -77,7 +78,7 @@ def quiet(_message):
 
 def test_writer_generates_sections_and_formats_references():
     repository = MemoryRepository()
-    writer = ReportWriter(FakeModel(["## Заголовок\n\n**Текст** введения."]), FakeStyleStore())
+    writer = ReportWriter(FakeModel(["## Заголовок\n\n**Текст** введения."]), FakeStyleStore(), load_prompt_catalog())
     writer.write(intro_and_references(), repository, WritingContext(), progress=quiet)
     assert repository.sections["01_intro"].startswith("# ВВЕДЕНИЕ {-}")
     assert "Текст введения." in repository.sections["01_intro"]
@@ -88,7 +89,7 @@ def test_writer_generates_sections_and_formats_references():
 def test_writer_skips_unchanged_sections():
     repository = MemoryRepository()
     model = FakeModel(["Первый вариант текста."])
-    writer = ReportWriter(model, FakeStyleStore())
+    writer = ReportWriter(model, FakeStyleStore(), load_prompt_catalog())
     writer.write(intro_and_references(), repository, WritingContext(), progress=quiet)
     status = writer.write(intro_and_references(), repository, WritingContext(), progress=quiet)
     assert status["01_intro"] == "без изменений"
@@ -98,7 +99,7 @@ def test_writer_skips_unchanged_sections():
 def test_writer_regenerates_when_context_changes():
     repository = MemoryRepository()
     model = FakeModel(["Первый.", "Второй."])
-    writer = ReportWriter(model, FakeStyleStore())
+    writer = ReportWriter(model, FakeStyleStore(), load_prompt_catalog())
     writer.write(intro_and_references(), repository, WritingContext(facts="а"), progress=quiet)
     writer.write(intro_and_references(), repository, WritingContext(facts="б"), progress=quiet)
     assert model.calls == ["writer", "writer"]
@@ -107,7 +108,7 @@ def test_writer_regenerates_when_context_changes():
 def test_writer_adds_figures_and_references_to_them():
     repository = MemoryRepository(figures={"er": "ER-диаграмма"})
     section = Section("01", "Проектирование", level=2, words=100, figures=("er",))
-    writer = ReportWriter(FakeModel(["Текст без ссылки."]), FakeStyleStore())
+    writer = ReportWriter(FakeModel(["Текст без ссылки."]), FakeStyleStore(), load_prompt_catalog())
     writer.write(Structure("t", (section,)), repository, WritingContext(), progress=quiet)
     text = repository.sections["01"]
     assert "{fig:er}" in text
@@ -119,7 +120,7 @@ def test_writer_rewrites_paragraphs_that_overlap_references():
     library = type("Library", (), {"documents": lambda self: index_references([("old.docx", copied)])})()
     model = FakeModel([copied, "Совсем иная формулировка про учёт заказов и подготовку сводных документов по итогам продаж."])
     repository = MemoryRepository()
-    writer = ReportWriter(model, FakeStyleStore(), library)
+    writer = ReportWriter(model, FakeStyleStore(), load_prompt_catalog(), library)
     section = Section("01", "ВВЕДЕНИЕ", numbered=False, words=50)
     writer.write(Structure("t", (section,)), repository, WritingContext(), progress=quiet)
     assert model.calls == ["writer", "rewriter"]

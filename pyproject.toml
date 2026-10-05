@@ -30,7 +30,7 @@ report-gen = "reportgen.interface.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-reportgen = ["data/*.yaml", "data/*.tex", "data/*.md"]
+reportgen = ["data/*.yaml", "data/guidelines/*.yaml", "data/guidelines/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

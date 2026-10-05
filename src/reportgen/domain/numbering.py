@@ -5,7 +5,7 @@ from pathlib import Path
 
 from reportgen.domain.blocks import Block, Kind
 
-APPENDIX_LETTERS = "АБВДЕЖИКЛМНПРСТУФХЦШЩЭЮЯ"
+APPENDIX_LETTERS = "АБВГДЕЖИКЛМНПРСТУФХЦШЩЭЮЯ"
 FIGURE_REFERENCE_RE = re.compile(r"\{fig:([\w\-]+)\}")
 
 

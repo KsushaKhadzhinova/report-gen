@@ -8,8 +8,9 @@ from typing import Callable
 
 from reportgen.application.ports import LanguageModel, ProjectRepository, ReferenceLibrary, StyleStore
 from reportgen.domain import overlap
+from reportgen.domain.prompts import PromptCatalog
 from reportgen.domain.structure import Section, Structure
-from reportgen.domain.style_profile import style_instruction
+from reportgen.domain.style_profile import style_hints
 
 MAX_REWRITE_PASSES = 2
 SECTION_MAX_TOKENS = 6000
@@ -47,10 +48,12 @@ class ReportWriter:
         self,
         model: LanguageModel,
         style_store: StyleStore,
+        prompts: PromptCatalog,
         references: ReferenceLibrary | None = None,
     ) -> None:
         self.model = model
         self.style_store = style_store
+        self.prompts = prompts
         self.references = references
 
     def write(
@@ -70,6 +73,9 @@ class ReportWriter:
             status[section.id] = self._write_one(section, repository, context, figures, force)
             progress(f"  {section.id}: {status[section.id]}")
         return status
+
+    def _system_prompt(self) -> str:
+        return self.prompts.system_prompt(style_hints(self.style_store.load()))
 
     def _write_one(
         self,
@@ -108,29 +114,17 @@ class ReportWriter:
         return "\n".join(parts) + "\n", rewritten
 
     def _ask_for_body(self, section: Section, context: WritingContext, figures: dict[str, str], available: list[str]) -> str:
-        return self.model.complete(
-            "writer",
-            style_instruction(self.style_store.load()),
-            self._prompt(section, context, figures, available),
-            max_tokens=SECTION_MAX_TOKENS,
-        )
+        prompt = self.prompts.section_prompt(section, context.facts, context.task, self._figure_rule(figures, available))
+        return self.model.complete("writer", self._system_prompt(), prompt, max_tokens=SECTION_MAX_TOKENS)
 
     @staticmethod
-    def _prompt(section: Section, context: WritingContext, figures: dict[str, str], available: list[str]) -> str:
-        figure_rule = ""
-        if available:
-            listing = "; ".join(f"{figure_token(n)} — {figures[n]}" for n in available)
-            figure_rule = (
-                "\nВ тексте обязательно сошлись на каждый рисунок оборотом вида «на рисунке {fig:имя} показано…», "
-                f"сохраняя метки в фигурных скобках без изменений. Рисунки: {listing}."
-            )
-        task = f"\nЗадание:\n{context.task}" if context.task else ""
-        facts = context.facts or "Сведений нет: пиши общим научно-техническим текстом без конкретных названий."
+    def _figure_rule(figures: dict[str, str], available: list[str]) -> str:
+        if not available:
+            return ""
+        listing = "; ".join(f"{figure_token(name)} — {figures[name]}" for name in available)
         return (
-            f"Напиши текст раздела «{section.title}».\n"
-            f"Содержание: {section.guide}\n"
-            f"Объём: около {section.words} слов. Только связные абзацы, без заголовков, без markdown, без списков, без таблиц."
-            f"{figure_rule}{task}\n\nСведения:\n{facts}"
+            "В тексте обязательно сошлись на каждый рисунок оборотом вида «на рисунке {fig:имя} показано…», "
+            f"сохраняя метки в фигурных скобках без изменений. Рисунки: {listing}."
         )
 
     def _remove_overlaps(self, body: str) -> tuple[str, int]:
@@ -150,9 +144,8 @@ class ReportWriter:
     def _rephrase(self, paragraph: str) -> str:
         reply = self.model.complete(
             "rewriter",
-            style_instruction(self.style_store.load()),
-            "Перепиши абзац другими словами и с другой структурой предложений, сохранив смысл, факты и метки в "
-            "фигурных скобках. Верни только абзац.\n\n" + paragraph,
+            self._system_prompt(),
+            self.prompts.rewrite_prompt(paragraph),
             temperature=REWRITE_TEMPERATURE,
         )
         return clean_model_output(reply)
@@ -168,7 +161,7 @@ class ReportWriter:
     def _references_markdown(section: Section, sources: list[str] | None) -> str:
         lines = [heading_line(section), ""]
         if not sources:
-            return "\n".join(lines + ["TODO: добавьте источники в файл sources.txt (по одному в строке).", ""])
+            return "\n".join(lines + ["[УТОЧНИТЬ: добавьте источники в файл sources.txt, по одному в строке]", ""])
         for number, entry in enumerate(sources, 1):
             lines += [f"{number} {LEADING_NUMBER_RE.sub('', entry)}", ""]
         return "\n".join(lines)
@@ -180,7 +173,8 @@ class ReportWriter:
                 "facts": context.facts,
                 "task": context.task,
                 "figures": figures,
-                "style": style_instruction(self.style_store.load()),
+                "prompt": self._system_prompt(),
+                "template": self.prompts.section,
                 "model": self.model.identity,
             },
             ensure_ascii=False,

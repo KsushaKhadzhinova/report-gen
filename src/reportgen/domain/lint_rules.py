@@ -7,7 +7,7 @@ from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
 
 FIRST_PERSON_RE = re.compile(r"(?<![а-яё])(я|мы|наш\w*|мой|моя)(?![а-яё])", re.IGNORECASE)
-PLACEHOLDER_RE = re.compile(r"TODO|\[нет файла|\?\?|lorem ipsum", re.IGNORECASE)
+PLACEHOLDER_RE = re.compile(r"TODO|\[нет файла|\[УТОЧНИТЬ|\?\?|lorem ipsum", re.IGNORECASE)
 EXCERPT_LENGTH = 60
 
 
