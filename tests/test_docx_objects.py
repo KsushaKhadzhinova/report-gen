@@ -5,7 +5,7 @@ from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Pt
 
 from reportgen.infrastructure.docx_format import DocxFormatService
-from reportgen.infrastructure.docx_objects import _sentence_case
+from reportgen.infrastructure.docx_objects import to_vak_site_entry
 
 
 def build_source(tmp_path: Path) -> Path:
@@ -54,14 +54,44 @@ def test_title_has_no_month(tmp_path: Path):
     assert find(fixed(tmp_path), "Минск").text == "Минск 2026"
 
 
-def test_section_heading_is_typed_in_normal_case_and_shown_in_capitals_by_style(tmp_path: Path):
+def test_section_headings_are_capitals_in_text_and_contents(tmp_path: Path):
     document = fixed(tmp_path)
-    assert find(document, "Цель").text == "Цель работы"
-    assert document.styles["Heading 1"].font.all_caps is True
+    assert find(document, "ЦЕЛЬ").text == "ЦЕЛЬ РАБОТЫ"
 
 
-def test_sentence_case_keeps_abbreviations_and_numbers():
-    assert _sentence_case("ИСПОЛЬЗОВАНИЕ СУБД ДЛЯ ЛР5") == "Использование СУБД для ЛР5"
+def test_filler_phrase_is_removed(tmp_path: Path):
+    from docx import Document as NewDocument
+
+    source = build_source(tmp_path)
+    document = NewDocument(str(source))
+    document.add_paragraph("В данном подразделе рассматриваются ключевые аспекты темы применительно к продукту.")
+    document.save(str(source))
+    output = tmp_path / "fixed.docx"
+    DocxFormatService().fix(source, output)
+    assert not any("В данном подразделе" in p.text for p in NewDocument(str(output)).paragraphs)
+
+
+def test_site_entry_follows_the_vak_form():
+    entry = "Similarweb Pro: обзор доменов [Электронный ресурс]. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
+    assert to_vak_site_entry(entry) == "Similarweb Pro : обзор доменов : [сайт]. – URL: https://pro.similarweb.com (дата обращения: 30.09.2026)."
+
+
+def test_entry_with_url_path_and_slash_keeps_the_address():
+    entry = "Sparx Systems: цены [Электронный ресурс]. – Режим доступа: https://sparxsystems.com/products/ea/. – Дата доступа: 02.10.2026."
+    assert "URL: https://sparxsystems.com/products/ea/ (дата обращения: 02.10.2026)." in to_vak_site_entry(entry)
+
+
+def test_entries_that_are_not_sites_are_left_alone():
+    book = "Иванов, И. И. Основы анализа. – Минск : БГУИР, 2025. – 120 с."
+    assert to_vak_site_entry(book) == book
+
+
+def test_unwanted_source_is_dropped_and_the_rest_renumbered(tmp_path: Path):
+    output = tmp_path / "fixed.docx"
+    DocxFormatService().fix(build_source(tmp_path), output, drop_sources=("Иванов",))
+    texts = [p.text for p in Document(str(output)).paragraphs]
+    assert not any("Иванов" in text for text in texts)
+    assert next(text for text in texts if "Петров" in text).startswith("1 Петров")
 
 
 def test_table_caption_has_a_blank_line_before_and_the_text_after_the_table_too(tmp_path: Path):
@@ -91,8 +121,7 @@ def test_figure_is_not_clipped_and_is_framed_by_blank_lines(tmp_path: Path):
 def test_sources_have_no_intro_dashes_or_italics_and_are_numbered(tmp_path: Path):
     document = fixed(tmp_path)
     texts = [p.text for p in document.paragraphs]
-    start = texts.index("Список использованных источников") if "Список использованных источников" in texts else None
-    assert start is not None
+    assert "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ" in texts
     assert not any("следующие" in text for text in texts)
     first = find(document, "Иванов")
     assert first.text.startswith("1 Иванов")
@@ -113,7 +142,3 @@ def test_column_widths_keep_short_columns_readable_and_fill_the_text_width():
     assert abs(sum(widths) - TEXT_WIDTH_CM) < 0.01
     assert widths[0] >= len("Часть") * 0.22
     assert widths[3] > widths[0] * 2
-
-
-def test_preposition_po_is_not_treated_as_an_abbreviation():
-    assert _sentence_case("ПРОВЕРКА ПО КРИТЕРИЯМ МЕТОДИКИ") == "Проверка по критериям методики"

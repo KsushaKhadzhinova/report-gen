@@ -23,7 +23,11 @@ CITY_DATE_RE = re.compile(rf"^(Минск),?\s+(?:{MONTHS})\s+(\d{{4}})\s*$", re
 TABLE_CAPTION_RE = re.compile(r"^Таблица\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 FIGURE_CAPTION_RE = re.compile(r"^Рисунок\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 LEADING_MARK_RE = re.compile(r"^\s*[–—\-•]\s*")
-KEEP_UPPER = frozenset({"ЛР", "КП", "БГУИР", "ИС", "ИТ", "ООП", "СУБД", "СТП", "ЭБ", "URL", "API"})
+FILLER_PHRASES = ("В данном подразделе рассматриваются ключевые аспекты",)
+SITE_ENTRY_RE = re.compile(
+    r"^(?P<head>.*?)\s*\[Электронный ресурс\]\.\s*[–-]\s*Режим доступа:\s*(?P<url>\S+?)\.?\s*[–-]\s*Дата доступа:\s*(?P<date>\d{2}\.\d{2}\.\d{4})\.?\s*$"
+)
+SUBTITLE_COLON_RE = re.compile(r"(?<=\S): (?=\S)")
 HEADING_ENDS = ("Heading",)
 SOURCES_TITLE = "список использованных источников"
 
@@ -65,37 +69,26 @@ def fix_title_date(document) -> int:
     return fixed
 
 
-def _sentence_case(text: str) -> str:
-    def convert(token: str, first: bool) -> str:
-        letters = re.sub(r"[^А-Яа-яЁёA-Za-z]", "", token)
-        if not letters or any(ch.isdigit() for ch in token) or token.strip(".,;:()«»") in KEEP_UPPER or len(letters) == 1:
-            return token
-        lowered = token.lower()
-        return lowered[:1].upper() + lowered[1:] if first else lowered
-
-    tokens = re.split(r"(\s+)", text)
-    result, first_word_done = [], False
-    for token in tokens:
-        if token.strip() and re.search(r"[А-Яа-яЁёA-Za-z]", token):
-            result.append(convert(token, not first_word_done))
-            first_word_done = True
-        else:
-            result.append(token)
-    return "".join(result)
-
-
 def fix_section_headings(document) -> int:
-    """Заголовки разделов набраны обычным регистром, прописными их показывает стиль Heading 1."""
-    document.styles["Heading 1"].font.all_caps = True
+    """Заголовки разделов набираются прописными буквами и в тексте, и в содержании."""
     fixed = 0
     for paragraph in document.paragraphs:
         if paragraph.style.name != "Heading 1" or not paragraph.text.strip():
             continue
-        letters = re.sub(r"[^А-Яа-яЁёA-Za-z]", "", paragraph.text)
-        if letters and letters.isupper():
-            _set_text(paragraph, _sentence_case(paragraph.text))
+        if paragraph.text != paragraph.text.upper():
+            _set_text(paragraph, paragraph.text.upper())
             fixed += 1
     return fixed
+
+
+def remove_filler_paragraphs(document) -> int:
+    """Убирает шаблонные фразы-заглушки, не несущие смысла."""
+    removed = 0
+    for paragraph in list(document.paragraphs):
+        if paragraph.text.strip().startswith(FILLER_PHRASES):
+            paragraph._p.getparent().remove(paragraph._p)
+            removed += 1
+    return removed
 
 
 def _space_before(paragraph, value) -> None:
@@ -237,8 +230,17 @@ def _find_sources_heading(paragraphs: list[Paragraph]) -> int | None:
     return next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
 
 
-def fix_sources_list(document) -> int:
-    """Источники: без вводной фразы, тире и курсива, с номерами по порядку."""
+def to_vak_site_entry(entry: str) -> str:
+    """Сайт по образцам ВАК РБ: «Название : [сайт]. – URL: адрес (дата обращения: дд.мм.гггг).»"""
+    match = SITE_ENTRY_RE.match(entry.strip())
+    if not match:
+        return entry
+    head = SUBTITLE_COLON_RE.sub(" : ", match.group("head").rstrip(" .,;"))
+    return f"{head} : [сайт]. – URL: {match.group('url')} (дата обращения: {match.group('date')})."
+
+
+def fix_sources_list(document, drop_patterns: tuple[str, ...] = ()) -> int:
+    """Источники: без вводной фразы, тире и курсива; сайты по ВАК РБ; ненужные записи удалены; номера по порядку."""
     paragraphs = list(document.paragraphs)
     start = _find_sources_heading(paragraphs)
     if start is None:
@@ -252,20 +254,29 @@ def fix_sources_list(document) -> int:
     if entries and entries[0].text.strip().endswith(":"):
         entries[0]._p.getparent().remove(entries[0]._p)
         entries = entries[1:]
-    for number, paragraph in enumerate(entries, 1):
-        _set_text(paragraph, f"{number} {LEADING_MARK_RE.sub('', paragraph.text).strip()}")
+    unwanted = [re.compile(pattern, re.IGNORECASE) for pattern in drop_patterns]
+    kept = []
+    for paragraph in entries:
+        if any(pattern.search(paragraph.text) for pattern in unwanted):
+            paragraph._p.getparent().remove(paragraph._p)
+        else:
+            kept.append(paragraph)
+    for number, paragraph in enumerate(kept, 1):
+        cleaned = to_vak_site_entry(LEADING_MARK_RE.sub("", paragraph.text).strip())
+        _set_text(paragraph, f"{number} {cleaned}")
         for run in paragraph.runs:
             run.italic = False
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
-    return len(entries)
+    return len(kept)
 
 
-def fix_all_objects(document) -> int:
+def fix_all_objects(document, drop_sources: tuple[str, ...] = ()) -> int:
     return (
         fix_title_date(document)
+        + remove_filler_paragraphs(document)
         + fix_section_headings(document)
         + fix_subsection_spacing(document)
         + fix_objects(document)
-        + fix_sources_list(document)
+        + fix_sources_list(document, drop_sources)
     )

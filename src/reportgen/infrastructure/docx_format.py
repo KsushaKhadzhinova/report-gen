@@ -125,14 +125,14 @@ class DocxFormatService:
         issues += [Issue("error", path.name, f"{count} {label}") for label, count in counts.items() if count]
         return issues
 
-    def fix(self, source: Path, output: Path) -> int:
+    def fix(self, source: Path, output: Path, drop_sources: tuple[str, ...] = ()) -> int:
         document = Document(str(source))
         self._fix_page(document)
         self._fix_normal_style(document)
         fixed = sum(self._fix_paragraph(p) for p in document.paragraphs)
         fixed += sum(self._fix_heading(p) for p in document.paragraphs if _is_heading(p))
         fixed += sum(self._fix_table_caption(p) for p in document.paragraphs if _is_table_caption(p))
-        fixed += fix_all_objects(document)
+        fixed += fix_all_objects(document, drop_sources)
         output.parent.mkdir(parents=True, exist_ok=True)
         document.save(str(output))
         return fixed

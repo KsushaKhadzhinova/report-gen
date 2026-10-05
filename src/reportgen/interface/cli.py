@@ -284,7 +284,7 @@ def cmd_fix(args) -> int:
     library = container.reference_library(args.reference) if args.reference else None
     remarks = Path(args.remarks).read_text(encoding="utf-8") if args.remarks else ""
     model = OpenAICompatibleModel() if (library or remarks) else None
-    result = ReportFixer(DocxFormatService(), load_prompt_catalog(), model, FileStyleStore(), library).fix(source, output, remarks)
+    result = ReportFixer(DocxFormatService(), load_prompt_catalog(), model, FileStyleStore(), library).fix(source, output, remarks, tuple(args.drop_source))
     if result.review:
         output.with_suffix(".review.md").write_text(result.review, encoding="utf-8")
     summary = {k: v for k, v in result.__dict__.items() if k != "review"}
@@ -378,6 +378,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("file")
     fix.add_argument("--output")
     fix.add_argument("--remarks")
+    fix.add_argument("--drop-source", action="append", default=[], help="регулярное выражение: записи источников, которые нужно убрать (можно несколько раз)")
     fix.add_argument("--reference")
     build = add("build", cmd_build, "Собрать DOCX, TEX и PDF")
     build.add_argument("project")

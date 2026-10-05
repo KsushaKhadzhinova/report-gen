@@ -38,9 +38,9 @@ class ReportFixer:
         self.style_store = style_store
         self.references = references
 
-    def fix(self, source: Path, output: Path, remarks: str = "") -> FixResult:
+    def fix(self, source: Path, output: Path, remarks: str = "", drop_sources: tuple[str, ...] = ()) -> FixResult:
         result = FixResult([str(issue) for issue in self.formatter.audit(source)])
-        result.paragraphs_formatted = self.formatter.fix(source, output)
+        result.paragraphs_formatted = self.formatter.fix(source, output, drop_sources)
         if self.model and self.references:
             result.paragraphs_rewritten = self._rewrite_overlaps(output)
         if self.model and remarks:
