@@ -5,7 +5,10 @@ import re
 from collections import Counter
 from pathlib import Path
 
-IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".idea", ".vscode", "target", "bin", "obj"}
+IGNORED_DIRS = {
+    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".idea", ".vscode", "target", "bin", "obj",
+    "coverage", "lcov-report", ".next", "out", ".cache",
+}
 LANGUAGES = {
     ".py": "Python", ".js": "JavaScript", ".ts": "TypeScript", ".tsx": "TypeScript", ".jsx": "JavaScript",
     ".java": "Java", ".kt": "Kotlin", ".cs": "C#", ".cpp": "C++", ".c": "C", ".h": "C/C++", ".go": "Go",
@@ -16,6 +19,8 @@ MANIFESTS = {
     "build.gradle": "Gradle", "Cargo.toml": "Cargo", "go.mod": "Go modules", "composer.json": "Composer",
     "Dockerfile": "Docker", "docker-compose.yml": "Docker Compose",
 }
+STRUCTURE_DIRS = frozenset({"config", "migrations", "seeders", "seeds", "models", "routes", "controllers", "middleware", "services", "utils", "tests", "test", "docs"})
+MAX_FILES_PER_DIR = 12
 ENTRY_HINTS = ("main.", "app.", "index.", "manage.py", "server.", "program.")
 SQL_TABLE_RE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"\[]?(\w+)", re.IGNORECASE)
 ROUTE_RE = re.compile(r"""@\w+\.(get|post|put|delete|patch|route)\(\s*['"]([^'"]+)""", re.IGNORECASE)
@@ -37,9 +42,13 @@ def analyze(root: Path, max_listing_files: int = 12) -> dict:
     modules: Counter = Counter()
     dependencies: list[str] = []
     largest: list[tuple[int, str]] = []
+    files_by_dir: dict[str, list[str]] = {}
 
     for path in iter_files(root):
         relative = path.relative_to(root).as_posix()
+        parent = path.parent.relative_to(root).as_posix()
+        if parent in STRUCTURE_DIRS and len(files_by_dir.setdefault(parent, [])) < MAX_FILES_PER_DIR:
+            files_by_dir[parent].append(path.name)
         if path.name in MANIFESTS:
             manifests.append(f"{relative} ({MANIFESTS[path.name]})")
             if path.name == "requirements.txt":
@@ -76,6 +85,7 @@ def analyze(root: Path, max_listing_files: int = 12) -> dict:
         "database_tables": sorted(tables),
         "routes": routes[:30],
         "key_files": [name for _, name in largest[:max_listing_files]],
+        "files_by_dir": files_by_dir,
     }
 
 
@@ -95,6 +105,8 @@ def summary_text(info: dict) -> str:
         lines.append("Таблицы БД: " + ", ".join(info["database_tables"]))
     if info["routes"]:
         lines.append("Маршруты API: " + ", ".join(info["routes"]))
+    for directory, names in info.get("files_by_dir", {}).items():
+        lines.append(f"Файлы в {directory}/: " + ", ".join(names))
     return "\n".join(lines)
 
 
