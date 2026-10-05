@@ -38,6 +38,11 @@ from reportgen.interface import container, doctor, onboarding
 EXIT_OK, EXIT_PROBLEMS, EXIT_USAGE = 0, 1, 2
 SETUP_COMMANDS = {"start", "doctor"}
 NONINTERACTIVE_ENV = "REPORTGEN_NONINTERACTIVE"
+RATE_LIMIT_HINT = (
+    "Похоже, исчерпан лимит бесплатных запросов (у облачных моделей он дневной и поминутный). "
+    "Уже написанные разделы сохранены: повторите ту же команду позже, генерация продолжится с места остановки. "
+    "Можно переключиться на другого провайдера: report-gen use gemini или report-gen use local."
+)
 
 
 def _mark(ok: bool) -> str:
@@ -403,4 +408,6 @@ def main(argv: list[str] | None = None) -> int:
         return args.handler(args)
     except (LLMError, LatexError, CaptureError, EmptyReportError, FileNotFoundError, ValueError, SecretStoreUnavailable) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
+        if "429" in str(error):
+            print(RATE_LIMIT_HINT, file=sys.stderr)
         return EXIT_PROBLEMS

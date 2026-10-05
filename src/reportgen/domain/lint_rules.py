@@ -168,6 +168,8 @@ def _check_document(blocks: list[Block]) -> list[Issue]:
 
 
 def check_blocks(blocks: list[Block]) -> list[Issue]:
+    if not blocks:
+        return [_error("документ", "В работе нет разделов: сначала выполните write или добавьте файлы в content/")]
     body = _body_text(blocks)
     issues: list[Issue] = []
     previous_level = 0

@@ -64,3 +64,7 @@ def test_period_belongs_after_the_citation_bracket():
 
 def test_long_dash_is_flagged():
     assert has(issues_for("# Раздел\n\nСистема — это набор модулей.\n"), "короткое")
+
+
+def test_empty_report_is_an_error_not_a_pass():
+    assert has(issues_for(""), "нет разделов")
