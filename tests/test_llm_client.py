@@ -1,7 +1,7 @@
 import pytest
 
 from reportgen.infrastructure import llm_client
-from reportgen.infrastructure.llm_client import LLMError, OpenAICompatibleModel
+from reportgen.infrastructure.llm_client import LLMError, OpenAICompatibleModel, RateLimitExhausted
 from reportgen.infrastructure.settings import Provider
 
 
@@ -64,3 +64,18 @@ def test_error_text_is_scrubbed(model):
     with pytest.raises(LLMError) as error:
         model.complete("writer", "s", "u")
     assert secret not in str(error.value)
+
+
+def test_long_rate_limit_stops_at_once_and_names_the_reset_time(model):
+    far_future_ms = str(int((llm_client.time.time() + 6 * 3600) * 1000))
+    model.session = FakeSession([FakeResponse(429, headers={"X-RateLimit-Reset": far_future_ms})] * 10)
+    with pytest.raises(RateLimitExhausted) as error:
+        model.complete("writer", "s", "u")
+    assert "сбросится" in str(error.value)
+    assert len(model.session.payloads) == 1
+
+
+def test_short_rate_limit_is_still_retried(model):
+    soon_ms = str(int((llm_client.time.time() + 5) * 1000))
+    model.session = FakeSession([FakeResponse(429, headers={"X-RateLimit-Reset": soon_ms}), reply("готово")])
+    assert model.complete("writer", "s", "u") == "готово"

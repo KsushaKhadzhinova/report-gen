@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
@@ -15,10 +16,16 @@ AUTO_MODEL = "auto"
 CHECK_MAX_TOKENS = 512
 MAX_TOKEN_BUDGET = 16000
 MAX_PAUSE_SECONDS = 45
+LONG_WAIT_SECONDS = 120
+TOO_MANY_REQUESTS = 429
 
 
 class LLMError(RuntimeError):
     pass
+
+
+class RateLimitExhausted(LLMError):
+    """Лимит запросов исчерпан надолго (обычно дневной): повторять сейчас бессмысленно."""
 
 
 class OpenAICompatibleModel:
@@ -68,6 +75,8 @@ class OpenAICompatibleModel:
         for model in self._candidates(role):
             try:
                 return self._request(model, messages, temperature, max_tokens)
+            except RateLimitExhausted:
+                raise
             except LLMError as error:
                 errors.append(str(error))
         raise LLMError(f"Все модели роли «{role}» недоступны:\n  " + "\n  ".join(errors))
@@ -101,6 +110,7 @@ class OpenAICompatibleModel:
             if budget:
                 payload["max_tokens"] = budget
             response = self._post_once(payload)
+            self._raise_if_limit_is_long(model, response)
             if response is None or response.status_code in RETRY_STATUSES:
                 last_problem = "нет ответа" if response is None else f"HTTP {response.status_code}"
                 time.sleep(self._pause(response, attempt))
@@ -114,6 +124,18 @@ class OpenAICompatibleModel:
             if truncated and budget:
                 budget = min(budget * 2, MAX_TOKEN_BUDGET)
         raise LLMError(f"{model}: {last_problem}")
+
+    @staticmethod
+    def _raise_if_limit_is_long(model: str, response: requests.Response | None) -> None:
+        if response is None or response.status_code != TOO_MANY_REQUESTS:
+            return
+        reset_ms = response.headers.get("X-RateLimit-Reset", "")
+        if not reset_ms.isdigit():
+            return
+        reset = int(reset_ms) / 1000
+        if reset - time.time() > LONG_WAIT_SECONDS:
+            moment = datetime.fromtimestamp(reset).strftime("%d.%m %H:%M")
+            raise RateLimitExhausted(f"{model}: HTTP 429, лимит запросов исчерпан, сбросится около {moment} по местному времени")
 
     @staticmethod
     def _pause(response: requests.Response | None, attempt: int) -> float:
