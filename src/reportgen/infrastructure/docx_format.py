@@ -10,6 +10,7 @@ from docx.shared import Cm, Mm, Pt
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.lint_rules import Issue
+from reportgen.infrastructure.docx_objects import fix_all_objects
 
 MIN_BODY_PARAGRAPH_CHARS = 80
 MARGIN_TOLERANCE = Mm(1)
@@ -19,13 +20,27 @@ CAPTION_RE = re.compile(r"^(Рисунок|Таблица|Листинг)\s+[\d�
 INDENT_TOLERANCE = Cm(0.1)
 
 
+def _inherited(paragraph, attribute: str):
+    """Действующее значение свойства абзаца: собственное, а если не задано, то из стиля и его родителей."""
+    value = getattr(paragraph.paragraph_format if attribute != "alignment" else paragraph, attribute)
+    style = paragraph.style
+    while value is None and style is not None:
+        value = getattr(style.paragraph_format, attribute)
+        style = style.base_style
+    return value
+
+
+def _alignment(paragraph):
+    return _inherited(paragraph, "alignment") or WD_ALIGN_PARAGRAPH.LEFT
+
+
 def _is_caption(paragraph) -> bool:
     return CAPTION_RE.match(paragraph.text.strip()) is not None
 
 
 def _is_body(paragraph) -> bool:
     long_enough = len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS
-    centered = paragraph.alignment == WD_ALIGN_PARAGRAPH.CENTER
+    centered = _alignment(paragraph) == WD_ALIGN_PARAGRAPH.CENTER
     return long_enough and not centered and not paragraph.style.name.startswith("Heading") and not _is_caption(paragraph)
 
 
@@ -36,7 +51,7 @@ def _has_foreign_font(paragraph) -> bool:
 
 
 def _has_wrong_indent(paragraph) -> bool:
-    indent = paragraph.paragraph_format.first_line_indent
+    indent = _inherited(paragraph, "first_line_indent")
     return indent is None or abs(indent - Cm(standard.PARAGRAPH_INDENT_CM)) > INDENT_TOLERANCE
 
 
@@ -47,7 +62,7 @@ def _is_heading(paragraph) -> bool:
 def _heading_alignment_is_wrong(paragraph) -> bool:
     centered_expected = paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None
     expected = WD_ALIGN_PARAGRAPH.CENTER if centered_expected else WD_ALIGN_PARAGRAPH.LEFT
-    return paragraph.alignment != expected
+    return _alignment(paragraph) != expected
 
 
 def _is_table_caption(paragraph) -> bool:
@@ -101,11 +116,11 @@ class DocxFormatService:
         counts = {
             "абзацев с другим шрифтом или размером": sum(_has_foreign_font(p) for p in body),
             "абзацев с абзацным отступом не 1,25 см": sum(_has_wrong_indent(p) for p in body),
-            "абзацев не по ширине": sum(p.alignment not in (None, WD_ALIGN_PARAGRAPH.JUSTIFY) for p in body),
+            "абзацев не по ширине": sum(_alignment(p) != WD_ALIGN_PARAGRAPH.JUSTIFY for p in body),
         }
         counts["заголовков с неверным выравниванием"] = sum(_heading_alignment_is_wrong(p) for p in document.paragraphs if _is_heading(p))
         counts["подписей таблиц не по левому краю"] = sum(
-            p.alignment != WD_ALIGN_PARAGRAPH.LEFT for p in document.paragraphs if _is_table_caption(p)
+            _alignment(p) != WD_ALIGN_PARAGRAPH.LEFT for p in document.paragraphs if _is_table_caption(p)
         )
         issues += [Issue("error", path.name, f"{count} {label}") for label, count in counts.items() if count]
         return issues
@@ -117,6 +132,7 @@ class DocxFormatService:
         fixed = sum(self._fix_paragraph(p) for p in document.paragraphs)
         fixed += sum(self._fix_heading(p) for p in document.paragraphs if _is_heading(p))
         fixed += sum(self._fix_table_caption(p) for p in document.paragraphs if _is_table_caption(p))
+        fixed += fix_all_objects(document)
         output.parent.mkdir(parents=True, exist_ok=True)
         document.save(str(output))
         return fixed
