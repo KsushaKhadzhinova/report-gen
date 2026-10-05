@@ -96,6 +96,20 @@ def test_outline_becomes_structure_without_copying_text():
     assert titles == [("ВВЕДЕНИЕ", False, 400), ("Анализ", True, 0), ("Предметная область", True, 80)]
 
 
+def test_outline_marks_references_and_skips_appendices():
+    entries = [
+        OutlineEntry("ВВЕДЕНИЕ", 1, 300),
+        OutlineEntry("1 Анализ предметной области", 1, 0),
+        OutlineEntry("СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ", 1, 270),
+        OutlineEntry("ПРИЛОЖЕНИЕ А", 1, 600),
+    ]
+    structure = structure_from_outline(entries)
+    assert [s.title for s in structure.sections] == ["ВВЕДЕНИЕ", "Анализ предметной области", "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ"]
+    references = structure.sections[-1]
+    assert references.is_references and references.words == 0
+    assert [s.rules for s in structure.sections[:2]] == ["introduction", "analysis"]
+
+
 def test_style_profile_keeps_statistics_but_no_author_text():
     paragraphs = [("a.docx", "Система обеспечивает хранение данных. " * 12 + "Результат работы приведён далее.")] * 3
     profile = build_profile(paragraphs)
