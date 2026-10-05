@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Protocol
 
 from reportgen.domain.blocks import Block
+from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
 from reportgen.domain.overlap import ReferenceDocument
 from reportgen.domain.style_profile import StyleProfile
@@ -86,7 +87,7 @@ class EditableText(Protocol):
 class FormatService(Protocol):
     def audit(self, path: Path) -> list[Issue]: ...
 
-    def fix(self, source: Path, output: Path, drop_sources: tuple[str, ...] = ()) -> int: ...
+    def fix(self, source: Path, output: Path, options: FixOptions = FixOptions()) -> int: ...
 
     def open_text(self, path: Path) -> EditableText: ...
 

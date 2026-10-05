@@ -7,8 +7,11 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
+from docx.text.paragraph import Paragraph
 
 from reportgen.domain import enterprise_standard as standard
+from reportgen.domain.citations import CITATION_RE, parse_numbers
+from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
 from reportgen.infrastructure.docx_objects import fix_all_objects
 
@@ -69,6 +72,34 @@ def _is_table_caption(paragraph) -> bool:
     return TABLE_CAPTION_RE.match(paragraph.text.strip()) is not None
 
 
+SOURCES_TITLE = "список использованных источников"
+
+
+def _citation_issues(document, name: str) -> list[Issue]:
+    """Ссылки в тексте на номера, которых нет в списке источников."""
+    paragraphs = list(document.paragraphs)
+    start = next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
+    if start is None:
+        return []
+    block = []
+    for paragraph in paragraphs[start + 1 :]:
+        if _is_heading(paragraph):
+            break
+        if paragraph.text.strip():
+            block.append(paragraph)
+    entries = block[1:] if block and block[0].text.strip().endswith(":") else block
+    listed = {id(p._p) for p in block}
+    cited = {
+        number
+        for paragraph in (Paragraph(element, document) for element in document.element.body.iter(qn("w:p")))
+        if id(paragraph._p) not in listed
+        for match in CITATION_RE.finditer(paragraph.text)
+        for number in parse_numbers(match.group("numbers"))
+    }
+    missing = sorted(number for number in cited if number > len(entries))
+    return [Issue("error", name, f"ссылки на источники, которых нет в списке ({len(entries)} записей): {missing}")] if missing else []
+
+
 def _margin_issues(document, name: str) -> list[Issue]:
     section = document.sections[0]
     expected = {
@@ -109,7 +140,7 @@ class _DocxText:
 class DocxFormatService:
     def audit(self, path: Path) -> list[Issue]:
         document = Document(str(path))
-        issues = _margin_issues(document, path.name)
+        issues = _margin_issues(document, path.name) + _citation_issues(document, path.name)
         if document.styles["Normal"].font.name != standard.FONT:
             issues.append(Issue("error", path.name, f"Шрифт Normal не {standard.FONT}"))
         body = [p for p in document.paragraphs if _is_body(p)]
@@ -125,14 +156,14 @@ class DocxFormatService:
         issues += [Issue("error", path.name, f"{count} {label}") for label, count in counts.items() if count]
         return issues
 
-    def fix(self, source: Path, output: Path, drop_sources: tuple[str, ...] = ()) -> int:
+    def fix(self, source: Path, output: Path, options: FixOptions = FixOptions()) -> int:
         document = Document(str(source))
         self._fix_page(document)
         self._fix_normal_style(document)
         fixed = sum(self._fix_paragraph(p) for p in document.paragraphs)
         fixed += sum(self._fix_heading(p) for p in document.paragraphs if _is_heading(p))
         fixed += sum(self._fix_table_caption(p) for p in document.paragraphs if _is_table_caption(p))
-        fixed += fix_all_objects(document, drop_sources)
+        fixed += fix_all_objects(document, options)
         output.parent.mkdir(parents=True, exist_ok=True)
         document.save(str(output))
         return fixed

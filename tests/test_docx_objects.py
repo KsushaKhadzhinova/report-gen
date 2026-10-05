@@ -4,8 +4,9 @@ from docx import Document
 from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Pt
 
+from reportgen.domain.fix_options import FixOptions
+from reportgen.domain.sources import to_vak_site_entry
 from reportgen.infrastructure.docx_format import DocxFormatService
-from reportgen.infrastructure.docx_objects import to_vak_site_entry
 
 
 def build_source(tmp_path: Path) -> Path:
@@ -88,7 +89,7 @@ def test_entries_that_are_not_sites_are_left_alone():
 
 def test_unwanted_source_is_dropped_and_the_rest_renumbered(tmp_path: Path):
     output = tmp_path / "fixed.docx"
-    DocxFormatService().fix(build_source(tmp_path), output, drop_sources=("Иванов",))
+    DocxFormatService().fix(build_source(tmp_path), output, FixOptions(drop_sources=("Иванов",)))
     texts = [p.text for p in Document(str(output)).paragraphs]
     assert not any("Иванов" in text for text in texts)
     assert next(text for text in texts if "Петров" in text).startswith("1 Петров")

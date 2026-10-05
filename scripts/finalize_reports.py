@@ -1,7 +1,8 @@
 """Пакетная подготовка отчётов: исправление оформления, вёрстка в Word, проверка.
 
-Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата>
+Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата> [--force]
 Исходные файлы не изменяются; для каждого отчёта создаётся подпапка с DOCX и PDF.
+Уже готовые отчёты пропускаются, если не указан --force; сбой одного отчёта не останавливает остальные.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "word_finalize.ps1"
 DROP_SOURCE = "Отчеты по лабораторным работам"
+EXTRA_OPTIONS = {"ЛР5": ["--citation-offset", "3", "--drop-citation", "1", "--drop-citation", "2", "--drop-citation", "3"]}
 
 
 def run(command: list[str]) -> str:
@@ -21,25 +23,37 @@ def run(command: list[str]) -> str:
     return (result.stdout + result.stderr).strip()
 
 
+def last_line(text: str, default: str) -> str:
+    lines = [line for line in text.splitlines() if line.strip()]
+    return lines[-1] if lines else default
+
+
 def finalize(source: Path, target_dir: Path) -> str:
     target_dir.mkdir(parents=True, exist_ok=True)
     fixed = target_dir / "fixed.docx"
     final_docx = target_dir / f"{target_dir.name}.docx"
     final_pdf = target_dir / f"{target_dir.name}.pdf"
-    env_run = ["report-gen", "fix", str(source), "--output", str(fixed), "--drop-source", DROP_SOURCE]
-    run(env_run)
+    run(["report-gen", "fix", str(source), "--output", str(fixed), "--drop-source", DROP_SOURCE, *EXTRA_OPTIONS.get(target_dir.name, [])])
     word_report = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT), str(fixed), str(final_docx), str(final_pdf)])
-    audit = run(["report-gen", "lint", "--docx", str(final_docx)]).splitlines()[-1]
-    return f"{source.name}: {word_report.splitlines()[-1] if word_report else 'нет ответа Word'} | аудит: {audit}"
+    if not final_docx.is_file() or not final_pdf.is_file():
+        return f"{source.name}: ОШИБКА Word | {last_line(word_report, 'нет ответа')[:300]}"
+    audit = last_line(run(["report-gen", "lint", "--docx", str(final_docx)]), "аудит не выдал результата")
+    return f"{source.name}: {last_line(word_report, 'нет ответа Word')} | аудит: {audit}"
 
 
 def main() -> int:
-    sources = sorted(Path(sys.argv[1]).rglob("*.docx"), key=lambda p: p.stat().st_size)
-    destination = Path(sys.argv[2])
+    arguments = [a for a in sys.argv[1:] if not a.startswith("--")]
+    force = "--force" in sys.argv
+    sources = sorted(Path(arguments[0]).rglob("*.docx"), key=lambda p: p.stat().st_size)
+    destination = Path(arguments[1])
     for source in sources:
+        name = source.stem.replace("ОТЧЕТ_", "").replace("_NotaCode", "")
+        target = destination / name
+        if not force and (target / f"{name}.docx").is_file() and (target / f"{name}.pdf").is_file():
+            print(f"{source.name}: уже готов, пропущен", flush=True)
+            continue
         started = time.time()
-        line = finalize(source, destination / source.stem.replace("ОТЧЕТ_", "").replace("_NotaCode", ""))
-        print(f"{line} | {time.time() - started:.0f} с", flush=True)
+        print(f"{finalize(source, target)} | {time.time() - started:.0f} с", flush=True)
     return 0
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
@@ -10,6 +11,9 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from reportgen.domain import enterprise_standard as standard
+from reportgen.domain.citations import renumber
+from reportgen.domain.fix_options import FixOptions
+from reportgen.domain.sources import vak_entries
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
 TABLE_FONT_PT = 12
@@ -24,10 +28,6 @@ TABLE_CAPTION_RE = re.compile(r"^Таблица\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 FIGURE_CAPTION_RE = re.compile(r"^Рисунок\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 LEADING_MARK_RE = re.compile(r"^\s*[–—\-•]\s*")
 FILLER_PHRASES = ("В данном подразделе рассматриваются ключевые аспекты",)
-SITE_ENTRY_RE = re.compile(
-    r"^(?P<head>.*?)\s*\[Электронный ресурс\]\.\s*[–-]\s*Режим доступа:\s*(?P<url>\S+?)\.?\s*[–-]\s*Дата доступа:\s*(?P<date>\d{2}\.\d{2}\.\d{4})\.?\s*$"
-)
-SUBTITLE_COLON_RE = re.compile(r"(?<=\S): (?=\S)")
 HEADING_ENDS = ("Heading",)
 SOURCES_TITLE = "список использованных источников"
 
@@ -230,23 +230,9 @@ def _find_sources_heading(paragraphs: list[Paragraph]) -> int | None:
     return next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
 
 
-def to_vak_site_entry(entry: str) -> str:
-    """Сайт по образцам ВАК РБ: «Название : [сайт]. – URL: адрес (дата обращения: дд.мм.гггг).»"""
-    match = SITE_ENTRY_RE.match(entry.strip())
-    if not match:
-        return entry
-    head = SUBTITLE_COLON_RE.sub(" : ", match.group("head").rstrip(" .,;"))
-    return f"{head} : [сайт]. – URL: {match.group('url')} (дата обращения: {match.group('date')})."
-
-
-def fix_sources_list(document, drop_patterns: tuple[str, ...] = ()) -> int:
-    """Источники: без вводной фразы, тире и курсива; сайты по ВАК РБ; ненужные записи удалены; номера по порядку."""
-    paragraphs = list(document.paragraphs)
-    start = _find_sources_heading(paragraphs)
-    if start is None:
-        return 0
+def _entry_paragraphs(paragraphs: list[Paragraph], heading_index: int) -> list[Paragraph]:
     entries = []
-    for paragraph in paragraphs[start + 1 :]:
+    for paragraph in paragraphs[heading_index + 1 :]:
         if _is_heading(paragraph):
             break
         if paragraph.text.strip():
@@ -254,29 +240,92 @@ def fix_sources_list(document, drop_patterns: tuple[str, ...] = ()) -> int:
     if entries and entries[0].text.strip().endswith(":"):
         entries[0]._p.getparent().remove(entries[0]._p)
         entries = entries[1:]
-    unwanted = [re.compile(pattern, re.IGNORECASE) for pattern in drop_patterns]
-    kept = []
-    for paragraph in entries:
+    return entries
+
+
+def _insert_copy_after(paragraph: Paragraph) -> Paragraph:
+    clone = copy.deepcopy(paragraph._p)
+    paragraph._p.addnext(clone)
+    return Paragraph(clone, paragraph._parent)
+
+
+def _style_entry(paragraph: Paragraph) -> None:
+    for run in paragraph.runs:
+        run.italic = False
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+
+
+def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int, tuple[int, ...]]:
+    """Приводит записи к виду ВАК, нумерует по порядку и возвращает соответствие старых номеров в тексте новым."""
+    unwanted = [re.compile(pattern, re.IGNORECASE) for pattern in options.drop_sources]
+    mapping: dict[int, tuple[int, ...]] = {number: () for number in options.drop_citations}
+    next_number = 1
+    for position, paragraph in enumerate(entries, 1):
+        text_number = position + options.citation_offset
         if any(pattern.search(paragraph.text) for pattern in unwanted):
             paragraph._p.getparent().remove(paragraph._p)
-        else:
-            kept.append(paragraph)
-    for number, paragraph in enumerate(kept, 1):
-        cleaned = to_vak_site_entry(LEADING_MARK_RE.sub("", paragraph.text).strip())
-        _set_text(paragraph, f"{number} {cleaned}")
+            mapping[text_number] = ()
+            continue
+        produced = vak_entries(LEADING_MARK_RE.sub("", paragraph.text).strip())
+        current = paragraph
+        for index, text in enumerate(produced):
+            if index:
+                current = _insert_copy_after(current)
+            _set_text(current, f"{next_number + index} {text}")
+            _style_entry(current)
+        mapping[text_number] = tuple(range(next_number, next_number + len(produced)))
+        next_number += len(produced)
+    return mapping
+
+
+def _all_paragraphs(document) -> list[Paragraph]:
+    return [Paragraph(element, document) for element in document.element.body.iter(qn("w:p"))]
+
+
+def _trim_space_before_punctuation(paragraph: Paragraph) -> None:
+    runs = [run for run in paragraph.runs if run.text]
+    for current, following in zip(runs, runs[1:], strict=False):
+        if current.text.endswith(" ") and following.text[:1] in ",.;:)":
+            current.text = current.text.rstrip(" ")
+
+
+def renumber_citations(document, mapping: dict[int, tuple[int, ...]], skip: set) -> int:
+    """Перенумеровывает ссылки на источники в тексте и таблицах, сохраняя оформление фрагментов."""
+    changed = 0
+    for paragraph in _all_paragraphs(document):
+        if paragraph._p in skip or "[" not in paragraph.text:
+            continue
+        before = paragraph.text
         for run in paragraph.runs:
-            run.italic = False
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
-    return len(kept)
+            if "[" in run.text:
+                run.text = renumber(run.text, mapping)
+        if paragraph.text == before and renumber(before, mapping) != before:
+            _set_text(paragraph, renumber(before, mapping))
+        if paragraph.text != before:
+            _trim_space_before_punctuation(paragraph)
+            changed += 1
+    return changed
 
 
-def fix_all_objects(document, drop_sources: tuple[str, ...] = ()) -> int:
+def fix_sources_list(document, options: FixOptions = FixOptions()) -> int:
+    """Источники: без вводной фразы, тире и курсива; сайты по ВАК РБ; ненужные записи удалены; ссылки в тексте согласованы с номерами."""
+    paragraphs = list(document.paragraphs)
+    heading_index = _find_sources_heading(paragraphs)
+    if heading_index is None:
+        return 0
+    entries = _entry_paragraphs(paragraphs, heading_index)
+    mapping = _rebuild_entries(entries, options)
+    renumber_citations(document, mapping, skip=set())
+    return sum(len(numbers) for numbers in mapping.values())
+
+
+def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
     return (
         fix_title_date(document)
         + remove_filler_paragraphs(document)
         + fix_section_headings(document)
         + fix_subsection_spacing(document)
         + fix_objects(document)
-        + fix_sources_list(document, drop_sources)
+        + fix_sources_list(document, options)
     )

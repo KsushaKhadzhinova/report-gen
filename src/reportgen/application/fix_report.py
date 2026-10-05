@@ -5,6 +5,7 @@ from pathlib import Path
 
 from reportgen.application.ports import FormatService, LanguageModel, ReferenceLibrary, StyleStore
 from reportgen.domain import overlap
+from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.prompts import PromptCatalog
 from reportgen.domain.style_profile import style_hints
 
@@ -38,9 +39,9 @@ class ReportFixer:
         self.style_store = style_store
         self.references = references
 
-    def fix(self, source: Path, output: Path, remarks: str = "", drop_sources: tuple[str, ...] = ()) -> FixResult:
+    def fix(self, source: Path, output: Path, remarks: str = "", options: FixOptions = FixOptions()) -> FixResult:
         result = FixResult([str(issue) for issue in self.formatter.audit(source)])
-        result.paragraphs_formatted = self.formatter.fix(source, output, drop_sources)
+        result.paragraphs_formatted = self.formatter.fix(source, output, options)
         if self.model and self.references:
             result.paragraphs_rewritten = self._rewrite_overlaps(output)
         if self.model and remarks:
