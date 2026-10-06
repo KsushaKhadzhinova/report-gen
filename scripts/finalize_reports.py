@@ -1,6 +1,6 @@
 """Пакетная подготовка отчётов: исправление оформления, вёрстка в Word, проверка.
 
-Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата> [--force]
+Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата> [--force] [--only ЛР4,ЛР5]
 Исходные файлы не изменяются; для каждого отчёта создаётся подпапка с DOCX и PDF.
 Уже готовые отчёты пропускаются, если не указан --force; сбой одного отчёта не останавливает остальные.
 """
@@ -42,9 +42,12 @@ def finalize(source: Path, target_dir: Path) -> str:
 
 
 def main() -> int:
-    arguments = [a for a in sys.argv[1:] if not a.startswith("--")]
+    only = sys.argv[sys.argv.index("--only") + 1].split(",") if "--only" in sys.argv else []
+    arguments = [a for a in sys.argv[1:] if not a.startswith("--") and a not in only]
     force = "--force" in sys.argv
     sources = sorted(Path(arguments[0]).rglob("*.docx"), key=lambda p: p.stat().st_size)
+    if only:
+        sources = [source for source in sources if any(token in source.stem for token in only)]
     destination = Path(arguments[1])
     for source in sources:
         name = source.stem.replace("ОТЧЕТ_", "").replace("_NotaCode", "")
