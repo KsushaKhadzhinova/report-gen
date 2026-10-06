@@ -14,6 +14,7 @@ from docx.text.paragraph import Paragraph
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.citations import CITATION_RE, parse_numbers, renumber
 from reportgen.domain.fix_options import FixOptions
+from reportgen.domain.object_sentences import figure_sentence, table_sentence
 from reportgen.domain.sources import vak_entries
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
@@ -227,6 +228,88 @@ def fix_objects(document) -> int:
     return fixed
 
 
+def _is_blank(item) -> bool:
+    return isinstance(item, Paragraph) and not item.text.strip() and not _has_picture(item)
+
+
+def _is_caption(item) -> bool:
+    return isinstance(item, Paragraph) and bool(TABLE_CAPTION_RE.match(item.text.strip()) or FIGURE_CAPTION_RE.match(item.text.strip()))
+
+
+def _lacks_text_after(items: list, index: int) -> bool:
+    """После таблицы или рисунка должен идти текст, а не заголовок, подпись другого объекта, таблица или конец документа."""
+    for item in items[index + 1 :]:
+        if _is_blank(item):
+            continue
+        return isinstance(item, Table) or _is_heading(item) or _is_caption(item) or _has_picture(item)
+    return True
+
+
+def _object_caption(items: list, index: int) -> str | None:
+    item = items[index]
+    if isinstance(item, Paragraph):
+        return item.text
+    for earlier in reversed(items[:index]):
+        if _is_blank(earlier):
+            continue
+        return earlier.text if isinstance(earlier, Paragraph) and TABLE_CAPTION_RE.match(earlier.text.strip()) else None
+    return None
+
+
+def _objects_needing_text(items: list) -> list[tuple[int, str]]:
+    found = []
+    for index, item in enumerate(items):
+        is_table = isinstance(item, Table)
+        is_figure_caption = isinstance(item, Paragraph) and bool(FIGURE_CAPTION_RE.match(item.text.strip()))
+        if not (is_table or is_figure_caption) or not _lacks_text_after(items, index):
+            continue
+        caption = _object_caption(items, index)
+        sentence = (table_sentence if is_table else figure_sentence)(caption or "")
+        if sentence:
+            found.append((index, sentence))
+    return found
+
+
+def count_objects_without_text(document) -> int:
+    return len(_objects_needing_text(list(_paragraphs_and_tables(document))))
+
+
+def _reference_paragraph(items: list, index: int) -> Paragraph | None:
+    for earlier in reversed(items[:index]):
+        if isinstance(earlier, Paragraph) and len(earlier.text) > 60 and not _is_heading(earlier) and not _is_caption(earlier):
+            if earlier.alignment != WD_ALIGN_PARAGRAPH.CENTER:
+                return earlier
+    return None
+
+
+def _sentence_paragraph(reference: Paragraph, text: str) -> Paragraph:
+    clone = copy.deepcopy(reference._p)
+    for child in list(clone):
+        if child.tag != qn("w:pPr"):
+            clone.remove(child)
+    paragraph = Paragraph(clone, reference._parent)
+    run = paragraph.add_run(text)
+    template = reference.runs[0]._r.find(qn("w:rPr")) if reference.runs else None
+    if template is not None:
+        run._r.insert(0, copy.deepcopy(template))
+    paragraph.paragraph_format.space_before = BLANK_LINE
+    return paragraph
+
+
+def fix_text_after_objects(document) -> int:
+    """Добавляет предложение-ссылку на таблицу или рисунок там, где сразу после них стоит заголовок, подпись или конец документа."""
+    items = list(_paragraphs_and_tables(document))
+    added = 0
+    for index, sentence in reversed(_objects_needing_text(items)):
+        reference = _reference_paragraph(items, index)
+        if reference is None:
+            continue
+        element = items[index]._tbl if isinstance(items[index], Table) else items[index]._p
+        element.addnext(_sentence_paragraph(reference, sentence)._p)
+        added += 1
+    return added
+
+
 def _find_sources_heading(paragraphs: list[Paragraph]) -> int | None:
     return next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
 
@@ -348,5 +431,6 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
         + fix_section_headings(document)
         + fix_subsection_spacing(document)
         + fix_objects(document)
+        + fix_text_after_objects(document)
         + fix_sources_list(document, options)
     )

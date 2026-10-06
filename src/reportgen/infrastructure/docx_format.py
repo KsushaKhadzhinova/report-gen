@@ -13,7 +13,7 @@ from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.citations import CITATION_RE, parse_numbers
 from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
-from reportgen.infrastructure.docx_objects import fix_all_objects
+from reportgen.infrastructure.docx_objects import count_objects_without_text, fix_all_objects
 
 MIN_BODY_PARAGRAPH_CHARS = 80
 MARGIN_TOLERANCE = Mm(1)
@@ -155,6 +155,9 @@ class DocxFormatService:
         issues = _margin_issues(document, path.name) + _citation_issues(document, path.name)
         if document.styles["Normal"].font.name != standard.FONT:
             issues.append(Issue("error", path.name, f"Шрифт Normal не {standard.FONT}"))
+        missing_text = count_objects_without_text(document)
+        if missing_text:
+            issues.append(Issue("warning", path.name, f"без текста после таблицы или рисунка: {missing_text}"))
         body = [p for p in document.paragraphs if _is_body(p)]
         counts = {
             "абзацев с другим шрифтом или размером": sum(_has_foreign_font(p) for p in body),
