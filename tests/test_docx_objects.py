@@ -143,3 +143,29 @@ def test_column_widths_keep_short_columns_readable_and_fill_the_text_width():
     assert abs(sum(widths) - TEXT_WIDTH_CM) < 0.01
     assert widths[0] >= len("Часть") * 0.22
     assert widths[3] > widths[0] * 2
+
+
+def build_two_sections(tmp_path: Path) -> Path:
+    document = Document()
+    for title, text, entries in (
+        ("Первый", "Факт [4]. Ещё [5, 6].", ["Метод.", "Сайт А.", "Сайт Б."]),
+        ("Второй", "Вывод [1]. Другое [2].", ["Книга.", "Статья."]),
+    ):
+        document.add_heading(title, level=1)
+        document.add_paragraph(text)
+        document.add_heading("СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ", level=1)
+        for entry in entries:
+            document.add_paragraph(f"– {entry}")
+    path = tmp_path / "two.docx"
+    document.save(path)
+    return path
+
+
+def test_each_sources_list_gets_its_own_offset_and_the_audit_checks_each_list(tmp_path: Path):
+    output = tmp_path / "two_fixed.docx"
+    DocxFormatService().fix(build_two_sections(tmp_path), output, FixOptions())
+    texts = [p.text for p in Document(output).paragraphs]
+    assert "Факт [1]. Ещё [2, 3]." in texts
+    assert "Вывод [1]. Другое [2]." in texts
+    audit = DocxFormatService().audit(output)
+    assert not [issue for issue in audit if "нет в списке" in issue.message]

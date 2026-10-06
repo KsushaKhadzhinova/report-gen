@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+from dataclasses import replace
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
@@ -11,7 +12,7 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from reportgen.domain import enterprise_standard as standard
-from reportgen.domain.citations import renumber
+from reportgen.domain.citations import CITATION_RE, parse_numbers, renumber
 from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.sources import vak_entries
 
@@ -290,11 +291,11 @@ def _trim_space_before_punctuation(paragraph: Paragraph) -> None:
             current.text = current.text.rstrip(" ")
 
 
-def renumber_citations(document, mapping: dict[int, tuple[int, ...]], skip: set) -> int:
-    """Перенумеровывает ссылки на источники в тексте и таблицах, сохраняя оформление фрагментов."""
+def renumber_citations(paragraphs: list[Paragraph], mapping: dict[int, tuple[int, ...]]) -> int:
+    """Перенумеровывает ссылки на источники в переданных абзацах, сохраняя оформление фрагментов."""
     changed = 0
-    for paragraph in _all_paragraphs(document):
-        if paragraph._p in skip or "[" not in paragraph.text:
+    for paragraph in paragraphs:
+        if "[" not in paragraph.text:
             continue
         before = paragraph.text
         for run in paragraph.runs:
@@ -308,16 +309,36 @@ def renumber_citations(document, mapping: dict[int, tuple[int, ...]], skip: set)
     return changed
 
 
+def _highest_citation(paragraphs: list[Paragraph]) -> int:
+    numbers = [n for paragraph in paragraphs for match in CITATION_RE.finditer(paragraph.text) for n in parse_numbers(match.group("numbers"))]
+    return max(numbers, default=0)
+
+
+def _options_for_list(options: FixOptions, entry_count: int, scope: list[Paragraph], several_lists: bool) -> FixOptions:
+    """В документе с несколькими списками сдвиг номеров в тексте определяется по каждому списку отдельно."""
+    if not several_lists or options.citation_offset or options.drop_citations:
+        return options
+    offset = max(0, _highest_citation(scope) - entry_count)
+    return replace(options, citation_offset=offset, drop_citations=tuple(range(1, offset + 1)))
+
+
 def fix_sources_list(document, options: FixOptions = FixOptions()) -> int:
-    """Источники: без вводной фразы, тире и курсива; сайты по ВАК РБ; ненужные записи удалены; ссылки в тексте согласованы с номерами."""
-    paragraphs = list(document.paragraphs)
-    heading_index = _find_sources_heading(paragraphs)
-    if heading_index is None:
-        return 0
-    entries = _entry_paragraphs(paragraphs, heading_index)
-    mapping = _rebuild_entries(entries, options)
-    renumber_citations(document, mapping, skip=set())
-    return sum(len(numbers) for numbers in mapping.values())
+    """Источники: без вводной фразы, тире и курсива; сайты по ВАК РБ; ненужные записи удалены; ссылки в тексте каждого раздела согласованы с номерами его списка."""
+    paragraphs = _all_paragraphs(document)
+    headings = [i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE]
+    total = 0
+    scope_start = 0
+    skip: set = set()
+    for heading in headings:
+        entries = _entry_paragraphs(paragraphs, heading)
+        scope = [p for p in paragraphs[scope_start:heading] if p._p not in skip]
+        skip |= {entry._p for entry in entries}
+        list_options = _options_for_list(options, len(entries), scope, len(headings) > 1)
+        mapping = _rebuild_entries(entries, list_options)
+        renumber_citations(scope, mapping)
+        total += sum(len(numbers) for numbers in mapping.values())
+        scope_start = heading + 1
+    return total
 
 
 def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:

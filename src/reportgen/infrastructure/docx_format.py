@@ -75,29 +75,39 @@ def _is_table_caption(paragraph) -> bool:
 SOURCES_TITLE = "список использованных источников"
 
 
-def _citation_issues(document, name: str) -> list[Issue]:
-    """Ссылки в тексте на номера, которых нет в списке источников."""
-    paragraphs = list(document.paragraphs)
-    start = next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
-    if start is None:
-        return []
+def _list_entries(paragraphs: list[Paragraph], heading_index: int) -> list[Paragraph]:
     block = []
-    for paragraph in paragraphs[start + 1 :]:
+    for paragraph in paragraphs[heading_index + 1 :]:
         if _is_heading(paragraph):
             break
         if paragraph.text.strip():
             block.append(paragraph)
-    entries = block[1:] if block and block[0].text.strip().endswith(":") else block
-    listed = {id(p._p) for p in block}
-    cited = {
-        number
-        for paragraph in (Paragraph(element, document) for element in document.element.body.iter(qn("w:p")))
-        if id(paragraph._p) not in listed
-        for match in CITATION_RE.finditer(paragraph.text)
-        for number in parse_numbers(match.group("numbers"))
-    }
-    missing = sorted(number for number in cited if number > len(entries))
-    return [Issue("error", name, f"ссылки на источники, которых нет в списке ({len(entries)} записей): {missing}")] if missing else []
+    return block
+
+
+def _citation_issues(document, name: str) -> list[Issue]:
+    """Ссылки в тексте на номера, которых нет в соответствующем списке источников (у каждого раздела свой список)."""
+    paragraphs = [Paragraph(element, document) for element in document.element.body.iter(qn("w:p"))]
+    headings = [i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE]
+    issues: list[Issue] = []
+    scope_start = 0
+    listed: set[int] = set()
+    for heading in headings:
+        block = _list_entries(paragraphs, heading)
+        entries = block[1:] if block and block[0].text.strip().endswith(":") else block
+        listed |= {id(p._p) for p in block}
+        cited = {
+            number
+            for paragraph in paragraphs[scope_start:heading]
+            if id(paragraph._p) not in listed
+            for match in CITATION_RE.finditer(paragraph.text)
+            for number in parse_numbers(match.group("numbers"))
+        }
+        missing = sorted(number for number in cited if number > len(entries))
+        if missing:
+            issues.append(Issue("error", name, f"ссылки на источники, которых нет в списке ({len(entries)} записей): {missing}"))
+        scope_start = heading + 1
+    return issues
 
 
 def _margin_issues(document, name: str) -> list[Issue]:

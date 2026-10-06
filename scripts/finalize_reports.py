@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "word_finalize.ps1"
 DROP_SOURCE = "Отчеты по лабораторным работам"
 METHOD_CITATIONS_SHIFT = ["--citation-offset", "3", "--drop-citation", "1", "--drop-citation", "2", "--drop-citation", "3"]
-EXTRA_OPTIONS = {"ЛР1": METHOD_CITATIONS_SHIFT, "ЛР5": METHOD_CITATIONS_SHIFT, "ЛР7": METHOD_CITATIONS_SHIFT}
+UNSOURCED_CITATIONS = ["--drop-citation", "6", "--drop-citation", "7"]
+EXTRA_OPTIONS = {"ЛР6": UNSOURCED_CITATIONS, "ЛР1": METHOD_CITATIONS_SHIFT, "ЛР5": METHOD_CITATIONS_SHIFT, "ЛР7": METHOD_CITATIONS_SHIFT}
 
 
 def run(command: list[str]) -> str:
