@@ -10,7 +10,7 @@ import yaml
 
 from reportgen import __version__
 from reportgen.application.build_report import ALL_FORMATS, EmptyReportError, build_report
-from reportgen.application.check_report import check_overlap, lint_report
+from reportgen.application.check_report import check_overlap, lint_report, list_open_questions
 from reportgen.application.fix_report import ReportFixer
 from reportgen.application.learn_style import learn_style
 from reportgen.application.write_report import WritingContext
@@ -265,6 +265,14 @@ def cmd_lint(args) -> int:
     return EXIT_PROBLEMS if errors else EXIT_OK
 
 
+def cmd_questions(args) -> int:
+    questions = list_open_questions(FileProjectRepository(Path(args.project)))
+    for number, question in enumerate(questions, 1):
+        print(f"{number}. {question}")
+    print(f"\nВопросов автору: {len(questions)}")
+    return EXIT_OK
+
+
 def cmd_overlap(args) -> int:
     library = container.reference_library(args.reference)
     if library is None:
@@ -373,6 +381,8 @@ def build_parser() -> argparse.ArgumentParser:
     lint = add("lint", cmd_lint, "Проверить соответствие СТП")
     lint.add_argument("project", nargs="?")
     lint.add_argument("--docx")
+    questions = add("questions", cmd_questions, "Вопросы автору по меткам [УТОЧНИТЬ]")
+    questions.add_argument("project")
     overlap = add("overlap", cmd_overlap, "Найти совпадения с эталонными работами")
     overlap.add_argument("target")
     overlap.add_argument("--reference")
