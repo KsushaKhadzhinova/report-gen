@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_LINE_SPACING
 from docx.shared import Pt
 
@@ -169,3 +170,13 @@ def test_each_sources_list_gets_its_own_offset_and_the_audit_checks_each_list(tm
     assert "Вывод [1]. Другое [2]." in texts
     audit = DocxFormatService().audit(output)
     assert not [issue for issue in audit if "нет в списке" in issue.message]
+
+
+def test_long_contents_entries_are_not_audited_as_body_paragraphs(tmp_path: Path):
+    document = Document()
+    document.styles.add_style("toc 1", WD_STYLE_TYPE.PARAGRAPH)
+    document.add_paragraph("ЛАБОРАТОРНАЯ РАБОТА №5. " + "ОЧЕНЬ ДЛИННОЕ НАЗВАНИЕ " * 5 + "	279", style="toc 1")
+    path = tmp_path / "toc.docx"
+    document.save(path)
+    messages = [issue.message for issue in DocxFormatService().audit(path)]
+    assert not any("не по ширине" in m or "абзацным отступом" in m for m in messages)

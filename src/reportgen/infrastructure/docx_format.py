@@ -44,7 +44,9 @@ def _is_caption(paragraph) -> bool:
 def _is_body(paragraph) -> bool:
     long_enough = len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS
     centered = _alignment(paragraph) == WD_ALIGN_PARAGRAPH.CENTER
-    return long_enough and not centered and not paragraph.style.name.startswith("Heading") and not _is_caption(paragraph)
+    name = paragraph.style.name.lower()
+    contents_entry = name.startswith(("toc", "оглавление"))
+    return long_enough and not centered and not name.startswith("heading") and not contents_entry and not _is_caption(paragraph)
 
 
 def _has_foreign_font(paragraph) -> bool:
