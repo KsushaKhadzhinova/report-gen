@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "word_finalize.ps1"
 DROP_SOURCE = "Отчеты по лабораторным работам"
-EXTRA_OPTIONS = {"ЛР5": ["--citation-offset", "3", "--drop-citation", "1", "--drop-citation", "2", "--drop-citation", "3"]}
+METHOD_CITATIONS_SHIFT = ["--citation-offset", "3", "--drop-citation", "1", "--drop-citation", "2", "--drop-citation", "3"]
+EXTRA_OPTIONS = {"ЛР1": METHOD_CITATIONS_SHIFT, "ЛР5": METHOD_CITATIONS_SHIFT, "ЛР7": METHOD_CITATIONS_SHIFT}
 
 
 def run(command: list[str]) -> str:
