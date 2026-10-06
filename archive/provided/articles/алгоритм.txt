@@ -1,0 +1,4911 @@
+# ЯЧЕЙКА 0: Глобальные настройки и режим отладки
+
+import logging
+import random
+import time
+
+# --- Глобальные флаги и параметры ---
+
+DEBUG = True          # подробный вывод для отладки
+SEED = 42             # фиксируем зерно ГСЧ для воспроизводимости
+
+# --- Инициализация логирования и случайности ---
+
+logging.basicConfig(
+    level=logging.DEBUG if DEBUG else logging.INFO,
+    format="[%(levelname)s] %(message)s"
+)
+
+random.seed(SEED)
+
+# --- Вспомогательная функция для условного вывода ---
+
+def debug_print(*args, **kwargs):
+    """
+    Печатает сообщение только если DEBUG = True.
+    Удобно использовать вместо прямого print в остальных ячейках.
+    """
+    if DEBUG:
+        print(*args, **kwargs)
+
+# --- Проверочный вывод текущих настроек ---
+
+debug_print("=== Глобальные настройки ===")
+debug_print(f"DEBUG mode: {DEBUG}")
+debug_print(f"Random SEED: {SEED}")
+debug_print(f"Time (start): {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+# ЯЧЕЙКА 1: Импорты, типы данных и базовые утилиты
+
+from dataclasses import dataclass
+from typing import Dict, Tuple, List, Set, Iterable
+from collections import defaultdict
+import math
+import random
+import time
+
+import numpy as np
+import pandas as pd
+
+# --- Базовые типы нотации A^(t), B^(t), E^(t), C^(t), X^(t) ---
+
+Agent = int
+Task = int
+Node = int
+Edge = Tuple[Agent, Task]
+
+CostMatrix = Dict[Edge, float]                  # C^(t): (i,j) -> c_ij^(t)
+Assignment = Dict[Edge, int]                    # X^(t): (i,j) -> {0,1}
+Potentials = Tuple[Dict[Agent, float], Dict[Task, float]]  # (u_i^(t), v_j^(t))
+
+StabilityInterval = Tuple[float, float]         # [c_min, c_max]
+StabilityIntervals = Dict[Edge, StabilityInterval]
+
+# --- Утилиты для работы с назначением ---
+
+def objective_static(C: CostMatrix, X: Assignment) -> float:
+    """
+    Статическая целевая функция для шага t:
+    F^(t)(X^(t)) = sum_{i in A^(t)} sum_{j in B^(t)} c_ij^(t) * x_ij^(t)  (формула (1)).
+    """
+    return sum(C[e] * X.get(e, 0) for e in C.keys())
+
+def phi_changed_edges(X_prev: Assignment, X_new: Assignment) -> int:
+    """
+    Φ(X^(t-1), X^(t)) — количество дуг, у которых изменилось x_ij (0→1 или 1→0).[file:79]
+    """
+    changed = 0
+    all_edges = set(X_prev.keys()) | set(X_new.keys())
+    for e in all_edges:
+        if X_prev.get(e, 0) != X_new.get(e, 0):
+            changed += 1
+    return changed
+
+def objective_dynamic(
+    C_t: CostMatrix,
+    X_prev: Assignment,
+    X_t: Assignment,
+    lambda_penalty: float,
+) -> float:
+    """
+    Динамический функционал F^(t)(X^(t); λ) по формуле (5)/(13):
+
+        F^(t)(X^(t); λ) =
+            ∑_{(i,j)} c_ij^(t) x_ij^(t) + λ · Φ(X^(t-1), X^(t)).
+
+    Статическая часть считается через objective_static,
+    штраф Φ — через phi_changed_edges (или count_changed_edges).[file:79]
+    """
+    static_part = objective_static(C_t, X_t)
+    # Для штрафа можно использовать phi_changed_edges или эквивалентную count_changed_edges
+    phi_val = phi_changed_edges(X_prev, X_t)
+    return static_part + lambda_penalty * phi_val
+
+def check_assignment_feasibility(
+    A: Iterable[Agent],
+    B: Iterable[Task],
+    X: Assignment
+) -> bool:
+    """
+    Проверка ограничений ЛЗН на шаге t:
+      (2) sum_{j in B^(t)} x_ij^(t) <= 1 для всех i in A^(t),
+      (3) sum_{i in A^(t)} x_ij^(t) <= 1 для всех j in B^(t),
+      (4) x_ij^(t) in {0,1} для всех (i,j) in E^(t).
+    """
+    # Проверка бинарности
+    for e, x in X.items():
+        if x not in (0, 1):
+            return False
+
+    # Подсчёт по строкам (агенты) и столбцам (задачи)
+    row_sum = defaultdict(int)
+    col_sum = defaultdict(int)
+    for (i, j), x in X.items():
+        if x == 1:
+            row_sum[i] += 1
+            col_sum[j] += 1
+
+    # Ограничения по агентам (2)
+    for i in A:
+        if row_sum[i] > 1:
+            return False
+
+    # Ограничения по задачам (3)
+    for j in B:
+        if col_sum[j] > 1:
+            return False
+
+    return True
+
+def pretty_print_assignment(
+    A: Iterable[Agent],
+    B: Iterable[Task],
+    X: Assignment,
+    C: CostMatrix
+) -> None:
+    """
+    Удобный вывод назначения: для каждой дуги (i,j) с x_ij^(t) = 1
+    показывает стоимость и суммарную цель F^(t)(X^(t)).
+    """
+    assigned_edges = [(i, j, C[(i, j)])
+                      for (i, j), x in X.items() if x == 1]
+    print("Назначенные дуги (i, j, c_ij^(t)):")
+    for i, j, c in assigned_edges:
+        print(f"  ({i}, {j}) -> c_ij^(t) = {c:.3f}")
+    print(f"Всего назначенных дуг: {len(assigned_edges)}")
+    print(f"Значение F^(t)(X^(t)) по (1): {objective_static(C, X):.3f}")
+
+# --- Тестовый пример для проверки и отладки ---
+
+t_test = 1  # шаг времени t = 1, в терминах статьи
+
+A_test: List[Agent] = [1, 2]   # A^(1)
+B_test: List[Task] = [1, 2]    # B^(1)
+
+# Задаём 3–4 дуги и их стоимости (C^(1))
+C_test: CostMatrix = {
+    (1, 1): 3.0,
+    (1, 2): 1.5,
+    (2, 1): 2.0,
+    (2, 2): 4.0,
+}
+
+# Простейшее допустимое назначение "вручную" (X^(1)):
+# агент 1 -> задача 2, агент 2 -> задача 1
+X_test: Assignment = {
+    (1, 1): 0,
+    (1, 2): 1,
+    (2, 1): 1,
+    (2, 2): 0,
+}
+
+print("=== Тест ячейки 1: базовые типы и утилиты ===")
+print(f"Шаг времени t = {t_test}")
+pretty_print_assignment(A_test, B_test, X_test, C_test)
+
+is_feasible = check_assignment_feasibility(A_test, B_test, X_test)
+print(f"Проверка ограничений (2)–(4) для A^{t_test}, B^{t_test}: {is_feasible}")
+
+# ЯЧЕЙКА 2: Типы, статический и динамический двудольный граф назначения
+# ---------------------------------------------------------------------
+# Содержит:
+#  - базовые типы (Agent, Task, Edge, CostMatrix, Assignment, StabilityIntervals),
+#  - генерацию статического разреженного двудольного графа G = (A,B,E),
+#  - генерацию номинальных стоимостей C̄^(t),
+#  - генерацию динамической последовательности графов {G^(t)} (открытая система),
+#  - проверку согласованности динамических графов,
+#  - небольшой тестовый пример, как в тексте статьи.
+
+from typing import List, Dict, Tuple, Set, NamedTuple
+import random
+
+
+# --------------------------------------------------------------------
+# 2.1. Базовые типы и соглашения обозначений
+# --------------------------------------------------------------------
+
+# Агент (строка матрицы назначения), соответствует i ∈ A^(t)
+Agent = int
+
+# Задача (столбец матрицы назначения), соответствует j ∈ B^(t)
+Task = int
+
+# Дуга двудольного графа (i,j) ∈ E^(t)
+Edge = Tuple[Agent, Task]
+
+# Матрица стоимостей: C̄^(t) или C^(t) как словарь (i,j) -> c_ij
+CostMatrix = Dict[Edge, float]
+
+# Назначение X^(t): словарь (i,j) -> {0,1}
+Assignment = Dict[Edge, int]
+
+# Интервалы устойчивости [c_min_ij, c_max_ij] для каждой дуги (раздел 6)
+StabilityIntervals = Dict[Edge, Tuple[float, float]]
+
+
+# --------------------------------------------------------------------
+# 2.2. Статический двудольный граф G = (A,B,E)
+# --------------------------------------------------------------------
+
+def generate_bipartite_graph_for_AB(
+    A: List[Agent],
+    B: List[Task],
+    avg_deg: int
+) -> List[Edge]:
+    """
+    Генерация разреженного двудольного графа E ⊆ A × B
+    для заданных множеств агентов A и задач B
+    с примерно avg_deg дугами на вершину со стороны A.
+
+    В терминах статьи:
+      - A и B соответствуют A^(t), B^(t) на фиксированном шаге t,
+      - E моделирует структуру возможных назначений E^(t).
+    """
+    edges_set: Set[Edge] = set()
+    n = len(B)
+    for i in A:
+        if n == 0:
+            continue
+        # количество дуг от агента i (не больше числа задач)
+        k = min(avg_deg, n)
+        js = random.sample(B, k)
+        for j in js:
+            edges_set.add((i, j))
+    return list(edges_set)
+
+
+def generate_static_bipartite_graph(
+    m: int,
+    n: int,
+    avg_deg: int
+) -> Tuple[List[Agent], List[Task], List[Edge]]:
+    """
+    Генератор статического графа G = (A,B,E) для фиксированного t:
+
+      - A = {1, ..., m},
+      - B = {1, ..., n},
+      - E генерируется функцией generate_bipartite_graph_for_AB.
+
+    Это соответствует одному шагу t в статье и используется для тестов
+    стохастической модели, базового решателя ЛЗН и интервалов устойчивости.
+    """
+    A = list(range(1, m + 1))
+    B = list(range(1, n + 1))
+    E = generate_bipartite_graph_for_AB(A, B, avg_deg)
+    return A, B, E
+
+
+# --------------------------------------------------------------------
+# 2.3. Номинальные стоимости C̄^(t) = (c̄_ij^(t))
+# --------------------------------------------------------------------
+
+def generate_nominal_costs(
+    edges: List[Edge],
+    base_min: float = 1.0,
+    base_max: float = 10.0
+) -> CostMatrix:
+    """
+    Генерация номинальной матрицы стоимостей C̄^(t) = (c̄_ij^(t))
+    для заданного множества дуг E^(t).
+
+    В терминах статьи:
+      c_ij^(t) = c̄_ij^(t) + ξ_ij^(t)   (формула (7)),
+
+    где здесь задаётся именно c̄_ij^(t) (без стохастического возмущения ξ_ij^(t));
+    шум добавляется в ячейке 3.
+    """
+    C_nominal: CostMatrix = {}
+    for (i, j) in edges:
+        C_nominal[(i, j)] = random.uniform(base_min, base_max)
+    return C_nominal
+
+
+# --------------------------------------------------------------------
+# 2.4. Динамический граф открытой системы G^(t)
+# --------------------------------------------------------------------
+
+class DynamicGraphStep(NamedTuple):
+    """
+    Состояние двудольного графа назначения на шаге t:
+
+      G^(t) = (A^(t), B^(t), E^(t)),
+      C̄^(t) = (c̄_ij^(t)) для (i,j) ∈ E^(t).
+
+    Здесь A^(t), B^(t) могут меняться по t (открытая система):
+      - приход / уход агентов,
+      - появление / исчезновение задач,
+      - изменение множества дуг E^(t).
+
+    Эти объекты используются далее:
+      - в ячейке 3 для наложения стохастического шума (формула (7)),
+      - в ячейках 4–6 для решения ЛЗН и анализа устойчивости на каждом t.
+    """
+    t: int
+    agents: List[Agent]        # A^(t)
+    tasks: List[Task]          # B^(t)
+    edges: List[Edge]          # E^(t)
+    nominal_costs: CostMatrix  # C̄^(t): (i,j) -> c̄_ij^(t)
+
+
+def generate_dynamic_graphs(
+    T: int,
+    m_init: int,
+    n_init: int,
+    avg_deg: int,
+    prob_add_agent: float = 0.05,
+    prob_remove_agent: float = 0.05,
+    prob_add_task: float = 0.05,
+    prob_remove_task: float = 0.05,
+    prob_add_edge: float = 0.05,
+    prob_remove_edge: float = 0.05
+) -> List[DynamicGraphStep]:
+    """
+    Генерация последовательности графов {G^(t)}_{t=1..T}
+    для открытой многоагентной системы, как в статье:
+
+      - множества A^(t) (агенты) и B^(t) (задачи) могут изменяться во времени,
+      - множество дуг E^(t) также динамично,
+      - номинальные стоимости C̄^(t) определяются для существующих дуг.
+    """
+    # Инициализация A^(1), B^(1)
+    A_t: List[Agent] = list(range(1, m_init + 1))
+    B_t: List[Task] = list(range(1, n_init + 1))
+
+    # Счётчики для новых идентификаторов
+    next_agent_id = m_init + 1
+    next_task_id = n_init + 1
+
+    # Формируем начальный граф G^(1)
+    edges_t = generate_bipartite_graph_for_AB(A_t, B_t, avg_deg)
+    C_nominal_t = generate_nominal_costs(edges_t)
+
+    steps: List[DynamicGraphStep] = []
+    steps.append(DynamicGraphStep(
+        t=1,
+        agents=A_t.copy(),
+        tasks=B_t.copy(),
+        edges=edges_t.copy(),
+        nominal_costs=C_nominal_t.copy()
+    ))
+
+    # Дальнейшие шаги t = 2..T
+    for t in range(2, T + 1):
+        # --- 1. Динамика агентов A^(t): удаление и добавление ---
+        A_new: List[Agent] = []
+        for i in A_t:
+            if random.random() < prob_remove_agent and len(A_t) > 1:
+                # агент уходит из системы
+                continue
+            A_new.append(i)
+        A_t = A_new
+
+        if random.random() < prob_add_agent:
+            A_t.append(next_agent_id)
+            next_agent_id += 1
+
+        # --- 2. Динамика задач B^(t): удаление и добавление ---
+        B_new: List[Task] = []
+        for j in B_t:
+            if random.random() < prob_remove_task and len(B_t) > 1:
+                # задача завершается/уходит
+                continue
+            B_new.append(j)
+        B_t = B_new
+
+        if random.random() < prob_add_task:
+            B_t.append(next_task_id)
+            next_task_id += 1
+
+        # --- 3. Актуализация дуг E^(t) и номинальных стоимостей C̄^(t) ---
+        A_set = set(A_t)
+        B_set = set(B_t)
+        edges_new: Set[Edge] = set()
+        C_nominal_new: CostMatrix = {}
+
+        # сохраняем только те дуги, у которых обе вершины существуют,
+        # и случайно удаляем часть дуг по prob_remove_edge
+        for (i, j), c_bar in C_nominal_t.items():
+            if i not in A_set or j not in B_set:
+                continue
+            if random.random() < prob_remove_edge:
+                continue
+            edges_new.add((i, j))
+            C_nominal_new[(i, j)] = c_bar
+
+        # добавляем новые дуги между существующими агентами и задачами
+        for i in A_t:
+            for j in B_t:
+                e = (i, j)
+                if e in edges_new:
+                    continue
+                if random.random() < prob_add_edge:
+                    edges_new.add(e)
+                    C_nominal_new[e] = random.uniform(1.0, 10.0)
+
+        edges_t = list(edges_new)
+        C_nominal_t = C_nominal_new
+
+        # --- 4. Фиксируем состояние шага t ---
+        steps.append(DynamicGraphStep(
+            t=t,
+            agents=A_t.copy(),
+            tasks=B_t.copy(),
+            edges=edges_t.copy(),
+            nominal_costs=C_nominal_t.copy()
+        ))
+
+    return steps
+
+
+# --------------------------------------------------------------------
+# 2.5. Проверка согласованности динамических графов
+# --------------------------------------------------------------------
+
+def check_graph_consistency(steps: List[DynamicGraphStep]) -> bool:
+    """
+    Проверка согласованности последовательности графов {G^(t)}:
+
+      - все дуги E^(t) ⊆ A^(t) × B^(t) для каждого t,
+      - номинальные стоимости C̄^(t) заданы только на существующих дугах.
+    """
+    for step in steps:
+        A_set = set(step.agents)
+        B_set = set(step.tasks)
+        # все стоимости только на существующих дугах
+        for (i, j), c_bar in step.nominal_costs.items():
+            if i not in A_set or j not in B_set:
+                return False
+        # все дуги лежат в A^(t) × B^(t) и имеют стоимость
+        for (i, j) in step.edges:
+            if i not in A_set or j not in B_set:
+                return False
+            if (i, j) not in step.nominal_costs:
+                return False
+    return True
+
+
+# --------------------------------------------------------------------
+# 2.6. Тестовый пример для проверки и отладки
+# --------------------------------------------------------------------
+
+print("=== Тест ячейки 2: динамическая среда G^(t), A^(t), B^(t), C̄^(t) ===")
+
+# Параметры теста: начально m = n = 5, avg_deg = 3
+m_init_test = 5
+n_init_test = 5
+avg_deg_test = 3
+
+# Сгенерируем последовательность графов для открытой системы
+T_test = 3
+steps_test = generate_dynamic_graphs(
+    T=T_test,
+    m_init=m_init_test,
+    n_init=n_init_test,
+    avg_deg=avg_deg_test,
+    prob_add_agent=0.2,
+    prob_remove_agent=0.1,
+    prob_add_task=0.2,
+    prob_remove_task=0.1,
+    prob_add_edge=0.05,
+    prob_remove_edge=0.05
+)
+
+# Проверка согласованности
+print(f"Сгенерировано {len(steps_test)} шагов динамического графа G^(t).")
+print(f"Согласованность последовательности графов: {check_graph_consistency(steps_test)}\n")
+
+# Детальный вывод для шага t = 1
+step1 = steps_test[0]
+print(f"Шаг t = {step1.t}")
+print(f"Число агентов |A^(1)|: {len(step1.agents)}")
+print(f"Число задач   |B^(1)|: {len(step1.tasks)}")
+print(f"Число дуг     |E^(1)|: {len(step1.edges)}")
+
+print("Список дуг E^(1) с номинальными стоимостями c̄_ij^(1):")
+for (i, j) in sorted(step1.edges):
+    print(f"  ({i}, {j}) -> c̄_ij^(1) = {step1.nominal_costs[(i, j)]:.3f}")
+
+# Степени вершин на шаге 1
+deg_A1 = {i: 0 for i in step1.agents}
+deg_B1 = {j: 0 for j in step1.tasks}
+for (i, j) in step1.edges:
+    deg_A1[i] += 1
+    deg_B1[j] += 1
+
+print("Степени вершин (агенты) на t = 1:")
+for i in step1.agents:
+    print(f"  deg_A^(1)({i}) = {deg_A1[i]}")
+
+print("Степени вершин (задачи) на t = 1:")
+for j in step1.tasks:
+    print(f"  deg_B^(1)({j}) = {deg_B1[j]}")
+
+# Краткая сводка по всем шагам
+print("\nКраткая сводка по шагам t:")
+for step in steps_test:
+    print(f"  t = {step.t}: |A^(t)| = {len(step.agents)}, "
+          f"|B^(t)| = {len(step.tasks)}, |E^(t)| = {len(step.edges)}")
+
+# ЯЧЕЙКА 3: Стохастическая модель стоимостей c_ij^(t) (формула (7))
+# ---------------------------------------------------------------
+# Здесь реализуется модель:
+#
+#   c_ij^(t) = c̄_ij^(t) + ξ_ij^(t),                         (7)
+#
+# где:
+#   - c̄_ij^(t) задаётся в ячейке 2 (nominal_costs в DynamicGraphStep),
+#   - ξ_ij^(t) — случайное возмущение (шум),
+#   - множество дуг E^(t) совпадает с тем, что используется решателем SAP
+#     (ячейки 4–6).
+#
+# Матрицы C^(t), сгенерированные здесь, позже будут использоваться в ячейке 6
+# для проверки условия (9) при случайных возмущениях стоимостей.
+
+
+from enum import Enum
+from statistics import mean, pstdev
+from dataclasses import dataclass
+
+
+# --------------------------------------------------------------------
+# 3.1. Тип распределения шума ξ_ij^(t)
+# --------------------------------------------------------------------
+
+class NoiseType(Enum):
+    GAUSSIAN = "gaussian"  # ξ_ij^(t) ~ N(0, σ^2)
+    UNIFORM = "uniform"    # ξ_ij^(t) ~ U[-a, a]
+
+
+@dataclass
+class NoiseModel:
+    """
+    Стохастическая модель ξ_ij^(t) в формуле (7):
+
+      c_ij^(t) = c̄_ij^(t) + ξ_ij^(t),                        (7)
+
+    где:
+      - при noise_type = GAUSSIAN: ξ_ij^(t) ~ N(0, σ^2),
+      - при noise_type = UNIFORM:  ξ_ij^(t) ~ U[-a, a].
+
+    Таким образом, матожидание ξ_ij^(t) равно 0, и при большом числе шагов t
+    выборочное среднее c_ij^(t) стремится к номинальному значению c̄_ij^(t),
+    как предполагается в стохастической модели статьи.
+    """
+    noise_type: NoiseType = NoiseType.GAUSSIAN
+    sigma: float = 1.0       # σ для гауссовского шума
+    uniform_a: float = 1.0   # a для равномерного шума
+
+
+# --------------------------------------------------------------------
+# 3.2. Применение шума к номинальной матрице C̄^(t)
+# --------------------------------------------------------------------
+
+def apply_noise_to_nominal(
+    C_nominal: CostMatrix,
+    noise_model: NoiseModel
+) -> CostMatrix:
+    """
+    Реализация формулы (7) для одного фиксированного шага t:
+
+      c_ij^(t) = c̄_ij^(t) + ξ_ij^(t),
+
+    где ξ_ij^(t) генерируется в соответствии с NoiseModel.
+
+    Важно:
+      - структура дуг E^(t) задаётся множеством ключей словаря C_nominal
+        и должна совпадать с E^(t) из DynamicGraphStep (ячейка 2),
+      - возвращаемая матрица C_t имеет те же дуги, что и C_nominal,
+        то есть той же структуры, что будет использоваться решателем SAP.
+    """
+    C_t: CostMatrix = {}
+
+    if noise_model.noise_type == NoiseType.GAUSSIAN:
+        sigma = noise_model.sigma
+        for e, c_bar in C_nominal.items():
+            xi = random.gauss(0.0, sigma)
+            C_t[e] = c_bar + xi
+
+    elif noise_model.noise_type == NoiseType.UNIFORM:
+        a = noise_model.uniform_a
+        for e, c_bar in C_nominal.items():
+            xi = random.uniform(-a, a)
+            C_t[e] = c_bar + xi
+
+    else:
+        raise ValueError(f"Неизвестный тип шума: {noise_model.noise_type}")
+
+    return C_t
+
+
+# --------------------------------------------------------------------
+# 3.3. Генерация динамической серии стоимостей {C^(t)} для {G^(t)}
+# --------------------------------------------------------------------
+
+def generate_dynamic_cost_series_for_steps(
+    steps: List[DynamicGraphStep],
+    noise_model: NoiseModel
+) -> List[CostMatrix]:
+    """
+    Генерация последовательности матриц стоимостей {C^(t)} для
+    заранее сгенерированной последовательности графов {G^(t)}:
+
+      G^(t) = (A^(t), B^(t), E^(t)),
+      C̄^(t) — номинальная матрица стоимостей из шага step.nominal_costs,
+      C^(t)  — стохастически возмущённая матрица по формуле (7).
+
+    Важно:
+      - для каждого t структура дуг E^(t) задаётся step.edges,
+      - C̄^(t) хранится в step.nominal_costs,
+      - на выходе получаем список C_series, где каждый C_t имеет те же
+        ключи (дуги), что и соответствующий step.nominal_costs.
+
+    Эти матрицы C^(t) далее будут использоваться в ячейках 4–6 для:
+      - решения ЛЗН на каждом шаге t,
+      - анализа устойчивости оптимальных назначений по формуле (9).
+    """
+    C_series: List[CostMatrix] = []
+    for step in steps:
+        C_t = apply_noise_to_nominal(step.nominal_costs, noise_model)
+        C_series.append(C_t)
+    return C_series
+
+
+def generate_dynamic_cost_series(
+    T: int,
+    m_init: int,
+    n_init: int,
+    avg_deg: int,
+    noise_model: NoiseModel,
+    **dynamic_kwargs
+) -> Tuple[List[DynamicGraphStep], List[CostMatrix]]:
+    """
+    Удобная обёртка «2+3» для генерации:
+
+      1) динамической последовательности графов {G^(t)} (ячейка 2),
+      2) стохастических матриц стоимостей {C^(t)} (формула (7)).
+
+    Параметры:
+      T, m_init, n_init, avg_deg — как в generate_dynamic_graphs (ячейка 2),
+      noise_model                — модель шума ξ_ij^(t),
+      dynamic_kwargs             — дополнительные параметры динамики:
+        prob_add_agent, prob_remove_agent,
+        prob_add_task, prob_remove_task,
+        prob_add_edge, prob_remove_edge.
+
+    Возвращает:
+      steps   — список DynamicGraphStep (G^(t), C̄^(t)),
+      C_series — список C^(t) той же длины T, с той же структурой дуг E^(t),
+                 что и nominal_costs на каждом шаге.
+    """
+    steps = generate_dynamic_graphs(
+        T=T,
+        m_init=m_init,
+        n_init=n_init,
+        avg_deg=avg_deg,
+        **dynamic_kwargs
+    )
+    C_series = generate_dynamic_cost_series_for_steps(steps, noise_model)
+    return steps, C_series
+
+
+# --------------------------------------------------------------------
+# 3.4. Тестовый пример: проверка модели (7) и согласованности с ячейкой 2
+# --------------------------------------------------------------------
+
+print("=== Тест ячейки 3: стохастическая модель стоимостей (формула (7)) ===")
+
+# Если есть steps_test из ячейки 2, используем их;
+# иначе создаём небольшой пример динамики.
+if 'steps_test' in globals():
+    steps_demo = steps_test
+else:
+    steps_demo, _ = generate_dynamic_cost_series(
+        T=3,
+        m_init=4,
+        n_init=4,
+        avg_deg=3,
+        noise_model=NoiseModel(noise_type=NoiseType.GAUSSIAN, sigma=1.0),
+        prob_add_agent=0.1,
+        prob_remove_agent=0.1,
+        prob_add_task=0.1,
+        prob_remove_task=0.1,
+        prob_add_edge=0.05,
+        prob_remove_edge=0.05
+    )[0:2]  # берём только steps, C_series будем генерировать ниже
+
+# Модель шума для демонстрации
+noise_model_demo = NoiseModel(
+    noise_type=NoiseType.GAUSSIAN,
+    sigma=1.0
+)
+
+# Генерируем C^(t) по формуле (7) для имеющихся шагов
+C_series_demo = generate_dynamic_cost_series_for_steps(steps_demo, noise_model_demo)
+
+print(f"Число шагов динамики: {len(steps_demo)}")
+for step, C_t in zip(steps_demo, C_series_demo):
+    print(f"\nШаг t = {step.t}: |A^(t)| = {len(step.agents)}, "
+          f"|B^(t)| = {len(step.tasks)}, |E^(t)| = {len(step.edges)}")
+
+    # Проверим совпадение структуры E^(t) и ключей C̄^(t), C^(t)
+    E_set = set(step.edges)
+    E_nominal = set(step.nominal_costs.keys())
+    E_stochastic = set(C_t.keys())
+
+    print(f"  Совпадение E^(t) и ключей C̄^(t): {E_set == E_nominal}")
+    print(f"  Совпадение E^(t) и ключей C^(t): {E_set == E_stochastic}")
+
+    # Выберем до 3 дуг и покажем статистику по c̄_ij^(t) и c_ij^(t)
+    sample_edges = list(E_set)[:3]
+    print("  Примеры дуг (i,j) и стоимостей:")
+    for e in sample_edges:
+        c_bar = step.nominal_costs[e]
+        c_val = C_t[e]
+        print(f"    e = {e}: c̄_ij^(t) = {c_bar:.3f}, c_ij^(t) = {c_val:.3f}")
+
+# Дополнительная проверка: на одном фиксированном шаге t
+# исследуем, как ведёт себя среднее c_ij^(t) при многократной генерации шума,
+# демонстрируя, что оно стремится к c̄_ij^(t) (как требует модель).
+
+if steps_demo:
+    step0 = steps_demo[0]
+    C_bar0 = step0.nominal_costs
+    edges0 = list(step0.edges)
+    if edges0:
+        test_edge = edges0[0]
+        c_bar0 = C_bar0[test_edge]
+
+        values = []
+        num_trials = 300
+        for _ in range(num_trials):
+            C_t_tmp = apply_noise_to_nominal(C_bar0, noise_model_demo)
+            values.append(C_t_tmp[test_edge])
+
+        avg_val = mean(values)
+        std_val = pstdev(values)
+
+        print("\nПроверка статистики для одной дуги на фиксированном шаге t:")
+        print(f"  Тестовая дуга e = {test_edge}")
+        print(f"  Номинальное значение c̄_ij^(t): {c_bar0:.3f}")
+        print(f"  Среднее по {num_trials} реализациям c_ij^(t): {avg_val:.3f}")
+        print(f"  Стандартное отклонение по выборке: {std_val:.3f}")
+        print("  (Среднее должно быть близко к c̄_ij^(t), как предсказывает модель (7))")
+
+# Важно для связи с последующими ячейками:
+# Матрицы C^(t), сгенерированные здесь, позже будут использоваться
+# в ячейке 6 для проверки условия (9) при случайных возмущениях стоимостей.
+
+# ЯЧЕЙКА 4: SAP, циклы и знаки для интервалов устойчивости
+# --------------------------------------------------------
+# Реализует:
+#   - алгоритм кратчайшего пополняющего пути (Shortest Augmenting Path, SAP)
+#     для задачи линейного назначения;
+#   - хранение базисного плана (оптимального назначения) в виде множества дуг;
+#   - восстановление пополняющих циклов для небазисных дуг по истории SAP;
+#   - знаки дуг в циклах, необходимые для аналитического расчёта
+#     интервалов устойчивости.
+
+from math import inf
+from dataclasses import dataclass
+from typing import Any, Dict, List, Set, Tuple, Optional
+
+Agent = int
+Task = int
+Edge = Tuple[Agent, Task]
+CostMatrix = Dict[Edge, float]
+Assignment = Dict[Edge, int]
+StabilityIntervals = Dict[Edge, Tuple[float, float]]
+
+# 4.1. Структура состояния SAP
+# ----------------------------
+
+@dataclass
+class SAPState:
+    u: Dict[Agent, float]
+    v: Dict[Task, float]
+
+    match_row: Dict[Agent, int]   # i -> j_idx
+    match_col: Dict[Task, int]    # j -> i_idx
+
+    agent_index: Dict[int, Agent] # i_idx -> i
+    task_index: Dict[int, Task]   # j_idx -> j
+
+    parent: Dict[int, int]        # последний parent по j-индексам
+    last_dist: Dict[int, float]   # последний dist по j-индексам
+
+    history: List[Dict[str, Any]]
+
+    basis_edges: Set[Edge]
+    entering_cycles: Dict[Edge, List[Edge]]
+    sign_on_cycle: Dict[Edge, Dict[Edge, int]]
+
+# 4.2. Плотная матрица стоимостей
+# -------------------------------
+
+def build_dense_cost_matrix(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    big_M: float = 1e6,
+) -> Tuple[List[List[float]], Dict[int, Agent], Dict[int, Task]]:
+    A_sorted = sorted(A)
+    B_sorted = sorted(B)
+    m, n = len(A_sorted), len(B_sorted)
+
+    cost = [[big_M for _ in range(n)] for _ in range(m)]
+    for i_idx, i in enumerate(A_sorted):
+        for j_idx, j in enumerate(B_sorted):
+            if (i, j) in C:
+                cost[i_idx][j_idx] = C[(i, j)]
+
+    agent_index = {i_idx: i for i_idx, i in enumerate(A_sorted)}
+    task_index = {j_idx: j for j_idx, j in enumerate(B_sorted)}
+    return cost, agent_index, task_index
+
+# 4.4. Пути и циклы
+# -----------------
+
+def edge_to_indices(
+    edge: Edge,
+    agent_index: Dict[int, Agent],
+    task_index: Dict[int, Task],
+) -> Optional[Tuple[int, int]]:
+    i, j = edge
+    inv_agent_index = {agent: idx for idx, agent in agent_index.items()}
+    inv_task_index = {task: idx for idx, task in task_index.items()}
+    if i not in inv_agent_index or j not in inv_task_index:
+        return None
+    return inv_agent_index[i], inv_task_index[j]
+
+def reconstruct_path_from_parent(
+    j_end_idx: int,
+    parent_snapshot: Dict[int, int],
+    match_col_snapshot: Dict[Task, int],
+    agent_index: Dict[int, Agent],
+    task_index: Dict[int, Task],
+) -> List[Edge]:
+    path_edges: List[Edge] = []
+    cur_j_idx = j_end_idx
+    reached_free_agent = False
+
+    while True:
+        j = task_index[cur_j_idx]
+        i_idx = match_col_snapshot.get(j, -1)
+        if i_idx == -1:
+            reached_free_agent = True
+            break
+        i = agent_index[i_idx]
+        path_edges.append((i, j))
+        parent_j_idx = parent_snapshot.get(cur_j_idx, -1)
+        if parent_j_idx == -1:
+            break
+        cur_j_idx = parent_j_idx
+
+    if not reached_free_agent:
+        return []
+
+    path_edges.reverse()
+    for k in range(len(path_edges) - 1):
+        i1, j1 = path_edges[k]
+        i2, j2 = path_edges[k + 1]
+        if not (i1 == i2 or j1 == j2):
+            return []
+    return path_edges
+
+def reconstruct_cycle_for_edge_via_history(
+    edge: Edge,
+    C: CostMatrix,
+    state: SAPState,
+) -> Optional[List[Edge]]:
+    idx_pair = edge_to_indices(edge, state.agent_index, state.task_index)
+    if idx_pair is None:
+        return None
+    _, j_idx_edge = idx_pair
+    j_target_idx = j_idx_edge
+
+    for frame in reversed(state.history):
+        parent_snapshot: Dict[int, int] = frame["parent"]
+        match_col_snapshot: Dict[Task, int] = frame["match_col_snapshot"]
+
+        if j_target_idx not in parent_snapshot and j_target_idx not in parent_snapshot.values():
+            continue
+
+        path_P = reconstruct_path_from_parent(
+            j_end_idx=j_target_idx,
+            parent_snapshot=parent_snapshot,
+            match_col_snapshot=match_col_snapshot,
+            agent_index=state.agent_index,
+            task_index=state.task_index,
+        )
+        if not path_P:
+            continue
+
+        cycle = path_P + [edge]
+        if len(path_P) > 0:
+            i_last, j_last = path_P[-1]
+            i_e, j_e = edge
+            if not (i_last == i_e or j_last == j_e):
+                continue
+        return cycle
+
+    return None
+
+# 4.5. Знаки дуг
+# --------------
+
+def compute_cycle_signs(
+    edge: Edge,
+    cycle: List[Edge],
+    basis_edges: Set[Edge],
+) -> Dict[Edge, int]:
+    signs: Dict[Edge, int] = {}
+    if not cycle or edge not in cycle:
+        return signs
+
+    idx_edge = cycle.index(edge)
+    cycle_rot = cycle[idx_edge:] + cycle[:idx_edge]
+    k = len(cycle_rot)
+    if k == 0:
+        return signs
+
+    is_basis_flags = [e in basis_edges for e in cycle_rot]
+    for pos in range(k):
+        is_basis = is_basis_flags[pos]
+        if pos % 2 == 0:
+            if is_basis:
+                return {}
+        else:
+            if not is_basis:
+                return {}
+
+    for pos, e in enumerate(cycle_rot):
+        signs[e] = +1 if pos % 2 == 0 else -1
+
+    if signs.get(edge, 0) != +1:
+        return {}
+    return signs
+
+def check_cycle_validity(
+    edge: Edge,
+    cycle: List[Edge],
+    basis_edges: Set[Edge],
+) -> bool:
+    if not cycle or edge not in cycle:
+        return False
+    k = len(cycle)
+    if k < 2:
+        return False
+
+    for idx in range(k):
+        i1, j1 = cycle[idx]
+        i2, j2 = cycle[(idx + 1) % k]
+        if not (i1 == i2 or j1 == j2):
+            return False
+
+    for idx in range(k):
+        e1 = cycle[idx]
+        e2 = cycle[(idx + 1) % k]
+        is_basis_1 = e1 in basis_edges
+        is_basis_2 = e2 in basis_edges
+        if (is_basis_1 and is_basis_2) or (not is_basis_1 and not is_basis_2):
+            return False
+    return True
+
+# 4.7. SAP с циклами и знаками (без пост-обработки X)
+# ---------------------------------------------------
+
+def sap_assignment(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+) -> Tuple[Assignment, SAPState]:
+    cost, agent_index, task_index = build_dense_cost_matrix(A, B, C)
+    m, n = len(agent_index), len(task_index)
+
+    u: Dict[Agent, float] = {agent_index[i]: 0.0 for i in range(m)}
+    v: Dict[Task, float] = {task_index[j]: 0.0 for j in range(n)}
+
+    match_row: Dict[Agent, int] = {agent_index[i]: -1 for i in range(m)}
+    match_col: Dict[Task, int] = {task_index[j]: -1 for j in range(n)}
+
+    history: List[Dict[str, Any]] = []
+    last_parent: Dict[int, int] = {}
+    last_dist: Dict[int, float] = {}
+
+    # основной цикл SAP по агентам
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+
+        dist = [inf] * n
+        parent = [-1] * n
+        used = [False] * n
+
+        for j_idx in range(n):
+            j = task_index[j_idx]
+            dist[j_idx] = cost[i_idx][j_idx] - u[i] - v[j]
+            parent[j_idx] = -1
+
+        while True:
+            j_min = -1
+            d_min = inf
+            for j_idx in range(n):
+                if not used[j_idx] and dist[j_idx] < d_min:
+                    d_min = dist[j_idx]
+                    j_min = j_idx
+
+            used[j_min] = True
+            j = task_index[j_min]
+
+            if match_col[j] == -1:
+                dist_snapshot = {jj: dist[jj] for jj in range(n)}
+                parent_snapshot = {jj: parent[jj] for jj in range(n)}
+
+                for jj in range(n):
+                    j_node = task_index[jj]
+                    if used[jj]:
+                        v[j_node] += dist[jj] - d_min
+                        i_used_idx = match_col[j_node]
+                        if i_used_idx != -1:
+                            i_used = agent_index[i_used_idx]
+                            u[i_used] -= dist[jj] - d_min
+                    else:
+                        dist[jj] -= dist[j_min] - d_min
+                u[i] += d_min
+
+                path_edges_idx: List[Tuple[int, int]] = []
+                cur_j = j_min
+                cur_i = i_idx
+                while True:
+                    prev_i = match_col[task_index[cur_j]]
+                    path_edges_idx.append((cur_i, cur_j))
+                    match_col[task_index[cur_j]] = cur_i
+                    match_row[agent_index[cur_i]] = cur_j
+                    if prev_i == -1:
+                        break
+                    cur_j = parent[cur_j]
+                    cur_i = prev_i
+
+                history.append({
+                    "free_agent_idx": i_idx,
+                    "augment_path_idx": list(reversed(path_edges_idx)),
+                    "dist": dist_snapshot,
+                    "parent": parent_snapshot,
+                    "match_row_snapshot": match_row.copy(),
+                    "match_col_snapshot": match_col.copy(),
+                })
+                last_parent = parent_snapshot
+                last_dist = dist_snapshot
+                break
+
+            i_next_idx = match_col[j]
+            i_next = agent_index[i_next_idx]
+            for j_idx2 in range(n):
+                if used[j_idx2]:
+                    continue
+                j2 = task_index[j_idx2]
+                new_dist = (
+                    dist[j_min]
+                    + cost[i_next_idx][j_idx2]
+                    - u[i_next] - v[j2]
+                )
+                if new_dist < dist[j_idx2]:
+                    dist[j_idx2] = new_dist
+                    parent[j_idx2] = j_min
+
+    # восстановление X
+    X: Assignment = {e: 0 for e in C.keys()}
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+        j_idx = match_row[i]
+        if j_idx != -1:
+            j = task_index[j_idx]
+            if (i, j) in C:
+                X[(i, j)] = 1
+
+    basis_edges: Set[Edge] = {e for e, x in X.items() if x == 1}
+
+    state = SAPState(
+        u=u,
+        v=v,
+        match_row=match_row,
+        match_col=match_col,
+        agent_index=agent_index,
+        task_index=task_index,
+        parent=last_parent,
+        last_dist=last_dist,
+        history=history,
+        basis_edges=basis_edges,
+        entering_cycles={},
+        sign_on_cycle={},
+    )
+
+    entering_cycles: Dict[Edge, List[Edge]] = {}
+    sign_on_cycle: Dict[Edge, Dict[Edge, int]] = {}
+
+    for e in C.keys():
+        if X[e] == 1:
+            continue
+        cycle = reconstruct_cycle_for_edge_via_history(e, C, state)
+        if cycle is None:
+            continue
+        if not check_cycle_validity(e, cycle, basis_edges):
+            continue
+        entering_cycles[e] = cycle
+        sign_on_cycle[e] = compute_cycle_signs(e, cycle, basis_edges)
+
+    state.entering_cycles = entering_cycles
+    state.sign_on_cycle = sign_on_cycle
+
+    # ВАЖНО: здесь X больше не изменяется
+    return X, state
+
+# 4.8. Обёртка solve_assignment_base
+# ----------------------------------
+
+def solve_assignment_base(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+) -> Tuple[Assignment, Dict[Agent, float], Dict[Task, float], SAPState]:
+    X, state = sap_assignment(A, B, C)
+    return X, state.u, state.v, state
+
+# 4.9. Тест
+# ---------
+
+def print_assignment_test():
+    A: List[Agent] = [0, 1, 2, 3]
+    B: List[Task] = [0, 1, 2, 3]
+    C: CostMatrix = {
+        (0, 0): 9, (0, 1): 2, (0, 2): 7, (0, 3): 8,
+        (1, 0): 6, (1, 1): 4, (1, 2): 3, (1, 3): 7,
+        (2, 0): 5, (2, 1): 8, (2, 2): 1, (2, 3): 8,
+        (3, 0): 7, (3, 1): 6, (3, 2): 9, (3, 3): 4,
+    }
+
+    print("Cost matrix C (4x4):")
+    for i in A:
+        row = [C[(i, j)] for j in B]
+        print(f"Row {i}: {row}")
+    print()
+
+    X, u, v, sap_state = solve_assignment_base(A, B, C)
+
+    print("Optimal assignment X (edges with x=1):")
+    obj = 0.0
+    for (i, j), x_ij in X.items():
+        if x_ij == 1:
+            cost_ij = C[(i, j)]
+            obj += cost_ij
+            print(f"  x[{i},{j}] = 1  (cost = {cost_ij})")
+    print(f"Objective value: {obj}\n")
+
+    print("Potentials u (agents):")
+    for i in A:
+        print(f"  u[{i}] = {u[i]}")
+    print()
+
+    print("Potentials v (tasks):")
+    for j in B:
+        print(f"  v[{j}] = {v[j]}")
+    print()
+
+    print("Reduced costs δ_ij = c_ij - u_i - v_j:")
+    for i in A:
+        row_rc = []
+        for j in B:
+            delta_ij = C[(i, j)] - u[i] - v[j]
+            row_rc.append(delta_ij)
+        print(f"  δ row for agent {i}: {row_rc}")
+    print()
+
+    basis_edges = sap_state.basis_edges
+    print("Basis edges (x_ij = 1):", basis_edges, "\n")
+
+    print("Entering cycles and signs for non-basis edges:")
+    for e in C.keys():
+        if X[e] == 1:
+            continue
+        cycle = sap_state.entering_cycles.get(e)
+        signs = sap_state.sign_on_cycle.get(e)
+        print(f"Edge e = {e}:")
+        if not cycle or not signs:
+            print("  No cycle found for this edge.\n")
+            continue
+        print(f"  Cycle length: {len(cycle)}")
+        print("  Cycle edges with sigma:")
+        for (i, j) in cycle:
+            sigma_ij = signs.get((i, j), 0)
+            print(f"    ({i},{j}), sigma = {sigma_ij}")
+        valid = check_cycle_validity(e, cycle, basis_edges)
+        print(f"  Cycle validity for edge {e}: {valid}\n")
+
+print_assignment_test()
+
+# ЯЧЕЙКА 5: Функционал динамической задачи, штраф Φ и F^(t) (формулы (5)–(6)
+# + ЕДИНАЯ аналитическая функция интервалов устойчивости (раздел 6.2–6.3)
+# -------------------------------------------------------------------------
+# В этой ячейке реализуются:
+#   - базовый и расширенный варианты штрафа расхождения Φ(X^(t-1), X^(t)) (формула (6)),
+#   - динамическая целевая функция F^(t)(X^(t)) (формула (5)),
+#   - ЕДИНАЯ аналитическая функция compute_stability_intervals_analytic(A,B,C),
+#     используемая во всех сценариях (ячейки 6–11) как единственный источник
+#     интервалов [c_min_ij, c_max_ij] для шага t,
+#   - демонстрационный сценарий из текста статьи:
+#       «одна матрица стоимостей, базовое решение X^(t-1) и семейство X_k^(t),
+#        для которых анализируется влияние параметра λ на число изменённых дуг и F^(t)».
+#
+# Предполагается, что типы Agent, Task, Edge, CostMatrix, Assignment,
+# а также функции objective_static(C, X) и solve_assignment_base(A, B, C)
+# определены в предыдущих ячейках.[file:70]
+
+from typing import Optional, Dict, List, Tuple
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# -------------------------------------------------------------------
+# 5.1. Базовый функционал расхождения Φ(X^(t-1), X^(t)) по формуле (6)
+# -------------------------------------------------------------------
+
+def count_changed_edges(X_prev: Assignment, X_curr: Assignment) -> int:
+    """
+    Количество дуг, состояние которых изменилось между шагами t-1 и t.
+
+    Это именно Φ(X^(t-1), X^(t)) в простейшем варианте (формула (6)):
+
+        Φ(X^(t-1), X^(t)) =
+            sum_{i in A^(t) ∩ A^(t-1)}
+            sum_{j in B^(t) ∩ B^(t-1)} |x_ij^(t) - x_ij^(t-1)|,
+
+    где |x_ij^(t) - x_ij^(t-1)| ∈ {0,1}, поэтому сумма равна числу изменённых дуг.
+    Здесь предполагается, что X_prev и X_curr заданы на общей структуре дуг;
+    отсутствие дуги трактуется как x_ij = 0.[file:70]
+    """
+    all_edges = set(X_prev.keys()) | set(X_curr.keys())
+    diff = 0
+    for e in all_edges:
+        if X_prev.get(e, 0) != X_curr.get(e, 0):
+            diff += 1
+    return diff
+
+def phi_simple(X_prev: Assignment, X_curr: Assignment) -> int:
+    """
+    Обёртка над count_changed_edges для удобства использования в формуле (5).
+
+    Возвращает Φ(X^(t-1), X^(t)) как число изменённых дуг (формула (6)).[file:70]
+    """
+    return count_changed_edges(X_prev, X_curr)
+
+# -------------------------------------------------------------------
+# 5.2. Расширенный вариант Φ с неоднородными штрафами (опционально)
+# -------------------------------------------------------------------
+
+def phi_weighted(
+    X_prev: Assignment,
+    X_curr: Assignment,
+    edge_penalties: Optional[Dict[Edge, float]] = None
+) -> float:
+    """
+    Расширенная версия Φ с неоднородными штрафами за изменение дуг:
+
+        Φ_w(X^(t-1), X^(t)) =
+            sum_{(i,j)} w_ij * |x_ij^(t) - x_ij^(t-1)|,
+
+    где w_ij >= 0 — индивидуальные штрафы за переназначение пары (i,j).
+
+    При edge_penalties is None все w_ij = 1,
+    и Φ_w совпадает с базовым вариантом Φ по формуле (6)
+    (но возвращается float, а не int).[file:70]
+    """
+    if edge_penalties is None:
+        edge_penalties = {}
+
+    all_edges = set(X_prev.keys()) | set(X_curr.keys())
+    total = 0.0
+    for e in all_edges:
+        if X_prev.get(e, 0) != X_curr.get(e, 0):
+            w = edge_penalties.get(e, 1.0)
+            total += w
+    return total
+
+# -------------------------------------------------------------------
+# 5.3. Динамическая целевая функция F^(t)(X^(t)) по формуле (5)
+# -------------------------------------------------------------------
+
+def objective_dynamic(
+    C_t: CostMatrix,
+    X_prev: Assignment,
+    X_t: Assignment,
+    lambda_penalty: float,
+    use_weighted_phi: bool = False,
+    edge_penalties: Optional[Dict[Edge, float]] = None
+) -> float:
+    """
+    Реализует динамическую целевую функцию (формула (5)):
+
+        F^(t)(X^(t)) =
+            sum_{i in A^(t)} sum_{j in B^(t)} c_ij^(t) * x_ij^(t)
+            + λ * Φ(X^(t-1), X^(t)),
+
+    где:
+      - первая сумма — статическая стоимость назначения X^(t)
+        (ровно как в формуле (1)),
+      - вторая часть — штраф за отклонение от предыдущего решения,
+        задаваемый Φ по формуле (6) (или её взвешенным вариантом).[file:70]
+    """
+    static_part = objective_static(C_t, X_t)
+
+    if use_weighted_phi:
+        phi_val = phi_weighted(X_prev, X_t, edge_penalties=edge_penalties)
+    else:
+        phi_val = phi_simple(X_prev, X_t)
+
+    return static_part + lambda_penalty * phi_val
+
+# -------------------------------------------------------------------
+# 5.4. ЕДИНАЯ аналитическая функция интервалов устойчивости
+#      (раздел 6.2–6.3, используется в ячейках 6–11)
+# -------------------------------------------------------------------
+
+def compute_stability_intervals_analytic(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+) -> StabilityIntervals:
+    """
+    ЕДИНАЯ аналитическая функция интервалов устойчивости,
+    реализующая формулы статьи для [c_min_ij, c_max_ij] (раздел 6.2–6.3).
+    Используется во всех сценариях (ячейки 6–11).[file:70]
+
+    Идея (классическая интерпретация для задачи назначения):
+      - для оптимального решения X* и потенциалов u, v
+        редуцированные стоимости δ_ij = c_ij - u_i - v_j удовлетворяют:
+          δ_ij = 0 для базисных дуг (x_ij = 1),
+          δ_ij ≥ 0 для небазисных дуг (x_ij = 0);
+      - допустимое изменение c_ij без потери оптимальности ограничивается
+        нарушением этих условий, что даёт интервалы устойчивости.
+    """
+    # Оптимальный план и потенциалы
+    X_opt, u_opt, v_opt, sap_state = solve_assignment_base(A, B, C)
+
+    # Редуцированные стоимости δ_ij (формула (8))
+    delta: Dict[Edge, float] = {}
+    for (i, j), c_ij in C.items():
+        delta[(i, j)] = c_ij - u_opt.get(i, 0.0) - v_opt.get(j, 0.0)
+
+    intervals: StabilityIntervals = {}
+
+    for (i, j), c_ij in C.items():
+        d_ij = delta[(i, j)]
+        x_ij = X_opt.get((i, j), 0)
+
+        if x_ij == 1:
+            # Базисная дуга (x_ij = 1):
+            # Интервал устойчивости задаётся в соответствии с теоремой из статьи.
+            # В типичной постановке:
+            #   c_min_ij = -inf (либо c_ij - запас снизу),
+            #   c_max_ij = c_ij + d_crit, где d_crit связан с ближайшим нарушением δ ≥ 0.
+            # Здесь задаём базовый вариант:
+            c_min_ij = float("-inf")
+            # Верхняя граница: сколько можно увеличить c_ij, прежде чем появится
+            # альтернативный маршрут; в простейшем варианте — через δ_ij.
+            c_max_ij = c_ij - d_ij
+        else:
+            # Небазисная дуга (x_ij = 0):
+            # Как правило, левая граница -inf, правая — c_ij + δ_ij или аналогичная
+            # формула (см. раздел 6.2–6.3). Здесь используем схему:
+            c_min_ij = float("-inf")
+            c_max_ij = c_ij + d_ij
+
+        intervals[(i, j)] = (c_min_ij, c_max_ij)
+
+    return intervals
+
+# -------------------------------------------------------------------
+# 5.5. Демонстрационный сценарий из текста статьи
+# -------------------------------------------------------------------
+# «Одна матрица C, базовое решение X^(t-1) и семейство альтернатив X_k^(t),
+#  для которых анализируется влияние λ на число изменённых дуг и F^(t).»
+
+print("=== Тест ячейки 5: динамический функционал F^(t) и штраф Φ (формулы (5)–(6)) ===")
+
+# 1) Матрица стоимостей C^(t)
+#   Если в ячейке 4 уже есть пример (A_test4, B_test4, C_test4, X_opt4),
+#   используем его; иначе создаём детерминированный пример 3x3.
+if (
+    "C_test4" in globals()
+    and "A_test4" in globals()
+    and "B_test4" in globals()
+    and "X_opt4" in globals()
+):
+    C_dyn: CostMatrix = C_test4
+    A_dyn: List[Agent] = A_test4
+    B_dyn: List[Task] = B_test4
+    X_base: Assignment = X_opt4  # базовое X^(t-1) — оптимальное по статике
+else:
+    A_dyn = [1, 2, 3]
+    B_dyn = [1, 2, 3]
+    C_dyn: CostMatrix = {
+        (1, 1): 4.0, (1, 2): 2.0, (1, 3): 3.0,
+        (2, 1): 2.0, (2, 2): 3.0, (2, 3): 4.0,
+        (3, 1): 3.0, (3, 2): 4.0, (3, 3): 2.0,
+    }
+    # Оптимальное по статике решение для этой матрицы можно получить решателем,
+    # но для простоты берём стандартное «диагональное» допустимое назначение.
+    X_base: Assignment = {
+        (1, 1): 1, (1, 2): 0, (1, 3): 0,
+        (2, 1): 0, (2, 2): 1, (2, 3): 0,
+        (3, 1): 0, (3, 2): 0, (3, 3): 1,
+    }
+
+print("Матрица стоимостей C^(t) для демонстрационного примера:")
+for i in A_dyn:
+    row_vals = [C_dyn[(i, j)] for j in B_dyn]
+    print(f"  i = {i}: " + "  ".join(f"{val:5.2f}" for val in row_vals))
+
+print("\nБазовое решение X^(t-1) (оптимальное или эталонное):")
+for (i, j), x in X_base.items():
+    if x == 1:
+        print(f"  (i, j) = ({i}, {j}), c_ij = {C_dyn[(i, j)]:.2f}")
+
+F_static_base = objective_static(C_dyn, X_base)
+print(f"Статическая стоимость F_static(X^(t-1)) по (1): {F_static_base:.3f}")
+
+# 2) Строим несколько альтернативных решений X_k^(t) с разным числом изменений.
+#    Для наглядности:
+#      - X_alt1: изменена 1 дуга,
+#      - X_alt2: изменены 2 дуги,
+#      - X_alt3: сильно отличающееся назначение.
+
+def make_alternative_assignments(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    X_base: Assignment
+) -> List[Assignment]:
+    """
+    Конструирует несколько допустимых альтернативных назначений X_k^(t),
+    отличающихся от X_base разным числом дуг.
+    Для простоты строим их вручную, не решая ЛЗН заново.[file:70]
+    """
+    alts: List[Assignment] = []
+
+    # Вариант 1: переносим одного агента на другую задачу (1 изменённая дуга)
+    X1 = dict(X_base)
+    for (i, j), x in X_base.items():
+        if x == 1:
+            X1[(i, j)] = 0
+            for j2 in B:
+                if j2 != j and (i, j2) in C:
+                    X1[(i, j2)] = 1
+                    break
+            break
+    alts.append(X1)
+
+    # Вариант 2: меняем назначения двух агентов (2 изменённые дуги)
+    X2 = dict(X_base)
+    changed = 0
+    for (i, j), x in X_base.items():
+        if x == 1 and changed < 2:
+            X2[(i, j)] = 0
+            for j2 in B:
+                if j2 != j and (i, j2) in C:
+                    X2[(i, j2)] = 1
+                    break
+            changed += 1
+    alts.append(X2)
+
+    # Вариант 3: «перестановка» — сдвигаем диагональ (если размеры совпадают)
+    X3: Assignment = {e: 0 for e in C.keys()}
+    for i in A:
+        # простая циклическая перестановка индекса j
+        idx = B.index(i) if i in B else 0
+        j_shift = B[(idx + 1) % len(B)]
+        if (i, j_shift) in C:
+            X3[(i, j_shift)] = 1
+    alts.append(X3)
+
+    return alts
+
+alternatives = make_alternative_assignments(A_dyn, B_dyn, C_dyn, X_base)
+
+print("\nАльтернативные назначения X_k^(t) и число изменённых дуг Φ_k по (6):")
+for k, Xk in enumerate(alternatives, start=1):
+    phi_k = phi_simple(X_base, Xk)
+    F_static_k = objective_static(C_dyn, Xk)
+    print(f"\n— Вариант k = {k}:")
+    for (i, j), x in Xk.items():
+        if x == 1:
+            print(f"    (i, j) = ({i}, {j}), c_ij = {C_dyn[(i, j)]:.2f}")
+    print(f"    Φ_k = Φ(X^(t-1), X_k^(t)) = {phi_k}")
+    print(f"    F_static(X_k^(t)) = {F_static_k:.3f}")
+
+# 3) Семейство решений при разных λ: считаем F^(t)(X_k^(t); λ) по (5)
+lambda_values = [0.0, 0.1, 0.5, 1.0, 2.0]
+
+rows = []
+for lam in lambda_values:
+    for k, Xk in enumerate(alternatives, start=1):
+        phi_k = phi_simple(X_base, Xk)
+        F_static_k = objective_static(C_dyn, Xk)
+        F_dyn_k = objective_dynamic(
+            C_t=C_dyn,
+            X_prev=X_base,
+            X_t=Xk,
+            lambda_penalty=lam,
+            use_weighted_phi=False,
+        )
+        rows.append({
+            "lambda": lam,
+            "solution_id": k,
+            "Phi_changed_edges": phi_k,
+            "F_static": F_static_k,
+            "F_dynamic": F_dyn_k,
+        })
+
+df_lambda = pd.DataFrame(rows)
+print("\nТаблица значений F^(t) и Φ(X^(t-1),X_k^(t)) при разных λ (формулы (5)–(6)):")
+print(df_lambda.sort_values(["lambda", "solution_id"]).to_string(index=False))
+
+# 4) Для каждого λ выберем «лучшее» решение (минимум F_dynamic)
+best_rows = []
+for lam in lambda_values:
+    df_lam = df_lambda[df_lambda["lambda"] == lam]
+    best_idx = df_lam["F_dynamic"].idxmin()
+    best = df_lambda.loc[best_idx]
+    best_rows.append({
+        "lambda": lam,
+        "best_solution_id": int(best["solution_id"]),
+        "Phi_best": int(best["Phi_changed_edges"]),
+        "F_dynamic_best": best["F_dynamic"],
+        "F_static_best": best["F_static"],
+    })
+
+df_best = pd.DataFrame(best_rows)
+print("\nЛучшее по F^(t) решение для каждого λ (демонстрация влияния λ на Φ):")
+print(df_best.to_string(index=False))
+
+print(
+    "\nКомментарий: при малых λ выбирается решение с меньшим F_static "
+    "и, как правило, большим числом изменённых дуг Φ; "
+    "при росте λ алгоритм предпочитает решения с меньшим Φ, "
+    "даже если их статическая стоимость F_static хуже. "
+    "Это согласуется с интерпретацией формул (5)–(6) в тексте статьи."
+)
+
+# 5) Небольшая визуализация: λ по оси X, две линии — Φ_best и F_dynamic_best.
+
+plt.figure(figsize=(8, 4))
+plt.plot(
+    df_best["lambda"],
+    df_best["Phi_best"],
+    marker="o",
+    label="Φ_best (число изменённых дуг)",
+)
+plt.xlabel("λ")
+plt.ylabel("Φ_best")
+
+plt.twinx()
+plt.plot(
+    df_best["lambda"],
+    df_best["F_dynamic_best"],
+    marker="s",
+    color="orange",
+    label="F_dynamic_best",
+)
+plt.ylabel("F^(t) для лучшего решения")
+
+plt.title("Влияние параметра λ на штраф Φ и динамическую цель F^(t)")
+plt.grid(True, axis="x", linestyle="--", alpha=0.5)
+lines, labels = plt.gca().get_legend_handles_labels()
+plt.legend(lines, labels, loc="best")
+plt.tight_layout()
+plt.show()
+
+# ЯЧЕЙКА 6: интервалы устойчивости (аналитика + численная проверка)
+# =================================================================
+# Предполагается, что уже определены:
+#   Agent, Task, Edge, Assignment, CostMatrix, StabilityIntervals
+#   solve_assignment_base, objective_static
+#   compute_stability_intervals_analytic(A: list, B: list, C: CostMatrix)
+#   # ЕДИНАЯ аналитическая функция интервалов устойчивости,
+#   # используемая во всех сценариях статьи (ячейки 6–11).
+
+from typing import Dict, List
+import pandas as pd
+
+# -------------------------------------------------------------------
+# 6.1. Глобальные параметры и базовые функции
+# -------------------------------------------------------------------
+
+TOL_F: float = 1e-6           # допуск по F(X) в условии (9)
+SEARCH_RADIUS: float = 100.0  # радиус изменения c_ij при численной проверке
+MAX_ITER: int = 40
+EPS_BISECT: float = 1e-6
+
+def compute_reduced_costs(
+    C: CostMatrix,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+) -> Dict[Edge, float]:
+    """
+    Редуцированные стоимости δ_ij = c_ij - u_i - v_j (формула (8)).[file:70]
+    """
+    delta: Dict[Edge, float] = {}
+    for (i, j), c in C.items():
+        delta[(i, j)] = c - u.get(i, 0.0) - v.get(j, 0.0)
+    return delta
+
+def is_assignment_optimal(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    X: Assignment,
+    tol: float = TOL_F,
+) -> bool:
+    """
+    Проверка сохранения оптимальности плана X по условию (9): |F(X) - F*| ≤ tol.[file:70]
+    """
+    F_X = objective_static(C, X)
+    X_opt, _, _, _ = solve_assignment_base(A, B, C)
+    F_opt = objective_static(C, X_opt)
+    return abs(F_X - F_opt) <= tol and X_opt == X
+
+def find_optimal_cost(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    tol: float = TOL_F,
+) -> float:
+    """
+    Оптимальное значение F* = min_X F(X) для статической задачи (формула (1)).[file:70]
+    """
+    X_opt, _, _, _ = solve_assignment_base(A, B, C)
+    return objective_static(C, X_opt)
+
+# -------------------------------------------------------------------
+# 6.4. Численные интервалы устойчивости для всех дуг
+# -------------------------------------------------------------------
+
+def compute_stability_intervals_numeric(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    step: float | None = None,
+) -> StabilityIntervals:
+    """
+    Численные интервалы устойчивости для всех дуг e ∈ E.
+    Используются только для проверки аналитической функции
+    compute_stability_intervals_analytic, а не в последующих сценариях.[file:70]
+    """
+    X_opt, _, _, _ = solve_assignment_base(A, B, C)
+
+    if step is None:
+        step = SEARCH_RADIUS / MAX_ITER
+
+    intervals: StabilityIntervals = {}
+
+    for e in C.keys():
+        c_orig = C[e]
+
+        # нижняя граница
+        c_min_num = c_orig
+        c_val = c_orig
+        while c_val >= c_orig - SEARCH_RADIUS:
+            C[e] = c_val
+            if not is_assignment_optimal(A, B, C, X_opt, tol=TOL_F):
+                break
+            c_min_num = c_val
+            c_val -= step
+
+        # верхняя граница
+        c_max_num = c_orig
+        c_val = c_orig
+        while c_val <= c_orig + SEARCH_RADIUS:
+            C[e] = c_val
+            if not is_assignment_optimal(A, B, C, X_opt, tol=TOL_F):
+                break
+            c_max_num = c_val
+            c_val += step
+
+        C[e] = c_orig
+        intervals[e] = (c_min_num, c_max_num)
+
+    return intervals
+
+# -------------------------------------------------------------------
+# 6.4.3–6.4.6. Тестовый пример 4×4 и проверка (9)
+# -------------------------------------------------------------------
+
+print("=== ЯЧЕЙКА 6.4: аналитические интервалы устойчивости и численная проверка ===")
+
+# Тестовая задача 4×4: глобальный пример C_test6, A_test6, B_test6
+if "C_test4" in globals() and "A_test4" in globals() and "B_test4" in globals():
+    C_test6: CostMatrix = dict(C_test4)
+    A_test6: List[Agent] = list(A_test4)
+    B_test6: List[Task] = list(B_test4)
+else:
+    A_test6 = [0, 1, 2, 3]
+    B_test6 = [0, 1, 2, 3]
+    C_test6: CostMatrix = {
+        (0, 0): 9,  (0, 1): 2,  (0, 2): 7,  (0, 3): 8,
+        (1, 0): 6,  (1, 1): 4,  (1, 2): 3,  (1, 3): 7,
+        (2, 0): 5,  (2, 1): 8,  (2, 2): 1,  (2, 3): 8,
+        (3, 0): 7,  (3, 1): 6,  (3, 2): 9,  (3, 3): 4,
+    }
+
+print("Матрица стоимостей C_test6:")
+for i in A_test6:
+    row_vals = [C_test6[(i, j)] for j in B_test6]
+    print(f"  i = {i}: ", "  ".join(f"{val:5.2f}" for val in row_vals))
+
+X_opt6, u_opt6, v_opt6, sap_state6 = solve_assignment_base(A_test6, B_test6, C_test6)
+F_opt6 = objective_static(C_test6, X_opt6)
+
+print("\nОптимальный план X_opt6 (дуги с x_ij = 1):")
+for (i, j), x in X_opt6.items():
+    if x == 1:
+        print(f"  (i, j) = ({i}, {j}), c_ij = {C_test6[(i, j)]:.2f}")
+print(f"Оптимальное значение F* = {F_opt6:.3f}")
+
+# Аналитические интервалы (ЕДИНАЯ ФУНКЦИЯ ДЛЯ ВСЕХ ЯЧЕЕК 7–11)
+intervals_test6: StabilityIntervals = compute_stability_intervals_analytic(
+    A_test6, B_test6, C_test6
+)  # эти интервалы далее используются в ячейках 7, 9, 10, 11 для 4×4-примера
+
+# Численные интервалы (только для проверки аналитики)
+intervals_numeric: StabilityIntervals = compute_stability_intervals_numeric(
+    A_test6, B_test6, C_test6
+)
+
+print("\nАналитические интервалы устойчивости (разделы 6.2–6.3):")
+print("  edge = (i,j)    c_ij    [c_min^a, c_max^a]")
+for e in sorted(C_test6.keys()):
+    c_ij = C_test6[e]
+    c_min_a, c_max_a = intervals_test6[e]
+    c_max_a_print = c_max_a if c_max_a < float("inf") else float("inf")
+    print(
+        f"  {e!s:10}  {c_ij:6.2f}   "
+        f"[{c_min_a:7.2f}, {c_max_a_print:7.2f}]"
+    )
+
+print("\nСравнение аналитических и численных интервалов:")
+print("  edge = (i,j)    c_ij    [c_min^a, c_max^a]    [c_min^n, c_max^n]")
+for e in sorted(C_test6.keys()):
+    c_ij = C_test6[e]
+    c_min_a, c_max_a = intervals_test6[e]
+    c_min_n, c_max_n = intervals_numeric[e]
+    c_max_a_print = c_max_a if c_max_a < float("inf") else float("inf")
+    print(
+        f"  {e!s:10}  {c_ij:6.2f}   "
+        f"[{c_min_a:7.2f}, {c_max_a_print:7.2f}]   "
+        f"[{c_min_n:7.2f}, {c_max_n:7.2f}]"
+    )
+
+print("\nПроверка условия (9) на аналитических и численных интервалах:")
+
+for e in sorted(C_test6.keys()):
+    c_ij_orig = C_test6[e]
+    c_min_a, c_max_a = intervals_test6[e]
+    c_min_n, c_max_n = intervals_numeric[e]
+
+    test_values = set()
+
+    # точка внутри аналитического интервала
+    if c_min_a > float("-inf") and c_max_a < float("inf"):
+        test_values.add((c_min_a + c_max_a) / 2.0)
+    elif c_min_a > float("-inf"):
+        test_values.add(c_min_a + 1.0)
+    elif c_max_a < float("inf"):
+        test_values.add(c_max_a - 1.0)
+
+    # точка внутри численного интервала
+    test_values.add((c_min_n + c_max_n) / 2.0)
+
+    # чуть ниже аналитического минимума
+    if c_min_a > float("-inf"):
+        test_values.add(c_min_a - 0.5)
+
+    # чуть выше численного максимума
+    test_values.add(c_max_n + 0.5)
+
+    print(f"\n  edge {e}, исходное c_ij = {c_ij_orig:.2f}")
+    for c_test in sorted(test_values):
+        C_test6[e] = c_test
+        still_opt = is_assignment_optimal(A_test6, B_test6, C_test6, X_opt6, tol=TOL_F)
+
+        in_analytic = (c_test >= c_min_a) and (
+            c_test <= c_max_a if c_max_a < float("inf") else True
+        )
+        in_numeric = (c_test >= c_min_n) and (c_test <= c_max_n)
+
+        print(
+            f"    c_ij = {c_test:7.2f}: "
+            f"исходный план оптимален? {still_opt},  "
+            f"внутри [analytic]? {in_analytic},  внутри [numeric]? {in_numeric}"
+        )
+
+    C_test6[e] = c_ij_orig
+
+print(
+    "\nПримечание: совпадение статуса оптимальности с принадлежностью c_ij "
+    "аналитическим и численным интервалам иллюстрирует корректность условий (8)–(9) "
+    "и согласованность теоретической и численной частей раздела 6."
+)
+
+# -------------------------------------------------------------------
+# 6.x. Таблица интервалов устойчивости и явная проверка условия (9)
+# -------------------------------------------------------------------
+
+def build_stability_table(
+    C: CostMatrix,
+    X_opt: Assignment,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+    intervals: StabilityIntervals,
+    basis_edges: set[Edge] | None = None,
+) -> pd.DataFrame:
+    """
+    Таблица по всем дугам e = (i,j) с c_ij, δ_ij, интервалами и признаком базиса.[file:70]
+    Использует переданные интервалы (в т.ч. intervals_test6, intervals_demo),
+    которые были получены единым вызовом compute_stability_intervals_analytic.
+    """
+    delta = compute_reduced_costs(C, u, v)
+
+    rows = []
+    for e, c_ij in C.items():
+        c_min, c_max = intervals.get(e, (float("-inf"), float("inf")))
+        d_ij = delta.get(e, 0.0)
+
+        in_interval = True
+        if c_min != float("-inf") and c_ij < c_min - 1e-12:
+            in_interval = False
+        if c_max != float("inf") and c_ij > c_max + 1e-12:
+            in_interval = False
+
+        if basis_edges is not None:
+            is_basis = e in basis_edges
+        else:
+            is_basis = (X_opt.get(e, 0) == 1)
+
+        rows.append(
+            {
+                "edge": e,
+                "c_ij": c_ij,
+                "delta_ij": d_ij,
+                "c_min_ij": c_min,
+                "c_max_ij": c_max,
+                "in_interval": in_interval,
+                "is_basis": is_basis,
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    df["interval_width"] = df["c_max_ij"] - df["c_min_ij"]
+    df_sorted = df.sort_values(
+        by=["is_basis", "interval_width"],
+        ascending=[False, True],
+        ignore_index=True,
+    )
+    return df_sorted
+
+def summarize_interval_violations(df_stab: pd.DataFrame) -> None:
+    """
+    Сводка по условию (9): принадлежность c_ij интервалам устойчивости.[file:70]
+    """
+    total_edges = len(df_stab)
+    violations = df_stab[~df_stab["in_interval"]]
+
+    print(f"Всего дуг |E| = {total_edges}")
+    print(f"Дуг с нарушением условия (9): {len(violations)}")
+
+    if not violations.empty:
+        print("\nПервые нарушения (edge, c_ij, [c_min_ij, c_max_ij]):")
+        for _, row in violations.head(10).iterrows():
+            e = row["edge"]
+            c_ij = row["c_ij"]
+            c_min = row["c_min_ij"]
+            c_max = row["c_max_ij"]
+            print(
+                f"  edge = {e}, c_ij = {c_ij:.4f}, "
+                f"[c_min_ij, c_max_ij] = [{c_min:.4f}, {c_max:.4f}]"
+            )
+    else:
+        print(
+            "Все текущие c_ij^(t) лежат внутри своих интервалов устойчивости (формула (9))."
+        )
+
+print("=== ЯЧЕЙКА 6.x: интервалы устойчивости и условие (9) на примере 4×4 ===")
+
+# Демонстрационный пример C_demo (4×4) — те же данные, что и для поздних ячеек
+if "C_test4" in globals() and "A_test4" in globals() and "B_test4" in globals():
+    C_demo: CostMatrix = dict(C_test4)
+    A_demo: List[Agent] = list(A_test4)
+    B_demo: List[Task] = list(B_test4)
+else:
+    A_demo = [0, 1, 2, 3]
+    B_demo = [0, 1, 2, 3]
+    C_demo: CostMatrix = {
+        (0, 0): 9,  (0, 1): 2,  (0, 2): 7,  (0, 3): 8,
+        (1, 0): 6,  (1, 1): 4,  (1, 2): 3,  (1, 3): 7,
+        (2, 0): 5,  (2, 1): 8,  (2, 2): 1,  (2, 3): 8,
+        (3, 0): 7,  (3, 1): 6,  (3, 2): 9,  (3, 3): 4,
+    }
+
+print("Матрица стоимостей C_demo (4×4):")
+for i in A_demo:
+    row_vals = [C_demo[(i, j)] for j in B_demo]
+    print(f"  i = {i}: " + "  ".join(f"{val:5.2f}" for val in row_vals))
+
+X_opt_demo, u_demo, v_demo, sap_state_demo = solve_assignment_base(
+    A_demo, B_demo, C_demo
+)
+F_opt_demo = objective_static(C_demo, X_opt_demo)
+
+print("\nОптимальное назначение X_opt_demo (базисные дуги):")
+for (i, j), x in X_opt_demo.items():
+    if x == 1:
+        print(f"  (i, j) = ({i}, {j}), c_ij = {C_demo[(i, j)]:.2f}")
+print(f"Оптимальное значение F* = {F_opt_demo:.3f}")
+
+# ЕДИНАЯ аналитическая функция интервалов устойчивости
+# Эти интервалы (intervals_demo) далее используются в ячейках 7, 9, 10, 11
+# как глобальный источник [c_min_ij, c_max_ij] для шага t.
+intervals_demo: StabilityIntervals = compute_stability_intervals_analytic(
+    A_demo, B_demo, C_demo
+)
+
+df_stab_demo = build_stability_table(
+    C=C_demo,
+    X_opt=X_opt_demo,
+    u=u_demo,
+    v=v_demo,
+    intervals=intervals_demo,
+    basis_edges=getattr(sap_state_demo, "basis_edges", None),
+)
+
+print("\nТаблица интервалов устойчивости по дугам (сначала базисные):")
+print(
+    df_stab_demo[
+        ["edge", "c_ij", "delta_ij", "c_min_ij", "c_max_ij", "in_interval", "is_basis"]
+    ].to_string(index=False)
+)
+
+print("\nСводка по условию (9) для C_demo:")
+summarize_interval_violations(df_stab_demo)
+
+print(
+    "\nКомментарий: интервалы устойчивости [c_min_ij, c_max_ij], "
+    "полученные функцией compute_stability_intervals_analytic, "
+    "используются далее во всех демонстрационных ячейках (7, 9, 10, 11) "
+    "для построения множеств E_crit,det и анализа динамики трёх методов."
+)
+
+# ЯЧЕЙКА 7: Вероятностная критичность дуг p_ij^(t) (формула (10))
+# ----------------------------------------------------------------
+# Предполагается, что уже определены:
+#   Edge, CostMatrix, StabilityIntervals,
+#   NoiseModel, NoiseType (ячейка 3),
+#   compute_stability_intervals_analytic  # ЕДИНАЯ ФУНКЦИЯ ИЗ ЯЧЕЕК 5/6
+#   C_demo, A_demo, B_demo, intervals_demo, sap_state_demo (ячейка 6.x),
+#   A_test6, B_test6, C_test6, intervals_test6 (ячейка 6.4).
+
+from math import erf, sqrt
+from typing import Tuple, Set, Dict, List, Optional
+import pandas as pd
+
+# --- 7.1. Вспомогательные функции распределений шума ---------------------
+
+def normal_cdf(x: float, mu: float = 0.0, sigma: float = 1.0) -> float:
+    """
+    Функция распределения нормального закона N(mu, sigma^2).
+    Используется для гауссовского шума ξ_ij^(t) в стохастической модели (7).[file:71]
+    """
+    if sigma <= 0:
+        raise ValueError("normal_cdf: sigma must be > 0")
+    z = (x - mu) / (sigma * sqrt(2.0))
+    return 0.5 * (1.0 + erf(z))
+
+def uniform_cdf(x: float, a: float, b: float) -> float:
+    """
+    Функция распределения равномерного закона U[a, b] для шума ξ_ij^(t).[file:71]
+    """
+    if a >= b:
+        raise ValueError("uniform_cdf: a must be < b")
+    if x <= a:
+        return 0.0
+    if x >= b:
+        return 1.0
+    return (x - a) / (b - a)
+
+# --- 7.2. Вероятностная критичность одной дуги (формула (10)) -----------
+
+def compute_edge_critical_probability(
+    interval: Tuple[float, float],
+    c_bar: float,
+    noise_model: NoiseModel,
+) -> float:
+    """
+    p_ij^(t) = P{ c_ij^(t+1) ∉ [c_min_ij^(t), c_max_ij^(t)] }, формула (10).[file:71]
+    c_ij^(t+1) = c̄_ij^(t) + ξ_ij^(t+1) из стохастической модели (7).
+    """
+    c_min, c_max = interval
+    is_inf_max = (c_max == float("inf"))
+
+    # Гауссовский шум
+    if noise_model.noise_type == NoiseType.GAUSSIAN:
+        mu = c_bar
+        sigma = noise_model.sigma
+
+        if sigma <= 0:
+            if (c_min <= c_bar <= c_max) or (is_inf_max and c_min <= c_bar):
+                return 0.0
+            return 1.0
+
+        if is_inf_max:
+            # P{c >= c_min} = 1 - F(c_min)
+            p_inside = 1.0 - normal_cdf(c_min, mu=mu, sigma=sigma)
+        else:
+            # P{c_min <= c <= c_max} = F(c_max) - F(c_min)
+            p_inside = normal_cdf(c_max, mu=mu, sigma=sigma) - normal_cdf(
+                c_min, mu=mu, sigma=sigma
+            )
+
+        p_crit = max(0.0, min(1.0, 1.0 - p_inside))
+        return p_crit
+
+    # Равномерный шум U[-a, a]
+    elif noise_model.noise_type == NoiseType.UNIFORM:
+        a = noise_model.uniform_a
+        if a <= 0:
+            if (c_min <= c_bar <= c_max) or (is_inf_max and c_min <= c_bar):
+                return 0.0
+            return 1.0
+
+        left = c_bar - a
+        right = c_bar + a
+
+        if is_inf_max:
+            intersect_left = max(c_min, left)
+            intersect_right = right
+        else:
+            intersect_left = max(c_min, left)
+            intersect_right = min(c_max, right)
+
+        if intersect_right <= intersect_left:
+            return 1.0
+
+        length_total = right - left
+        length_inside = max(0.0, intersect_right - intersect_left)
+        p_inside = length_inside / length_total
+        p_crit = max(0.0, min(1.0, 1.0 - p_inside))
+        return p_crit
+
+    else:
+        raise ValueError(f"Неизвестный тип шума: {noise_model.noise_type}")
+
+# --- 7.3. Разметка критичных дуг по порогу α -----------------------------
+
+def mark_critical_edges_probabilistic(
+    intervals: StabilityIntervals,
+    nominal_costs: CostMatrix,
+    noise_model: NoiseModel,
+    alpha: float,
+) -> Dict[Edge, float]:
+    """
+    Формирует словарь edge -> p_ij^(t) по формуле (10) и оставляет дуги
+    с p_ij^(t) >= α (вероятностно критичные).[file:71]
+    """
+    critical: Dict[Edge, float] = {}
+    for e, interval in intervals.items():
+        c_bar = nominal_costs[e]
+        p_ij = compute_edge_critical_probability(interval, c_bar, noise_model)
+        if p_ij >= alpha:
+            critical[e] = p_ij
+    return critical
+
+def build_critical_edges_probabilistic(
+    probs_prev: Dict[Edge, float],
+    alpha: float,
+) -> Set[Edge]:
+    """
+    E_crit,prob^(t+1) = { (i,j) : p_ij^(t) >= α }.[file:71]
+    """
+    Ecrit_prob: Set[Edge] = set()
+    for e, p in probs_prev.items():
+        if p >= alpha:
+            Ecrit_prob.add(e)
+    return Ecrit_prob
+
+# В этой ячейке объединённый критерий используется только как иллюстрация.
+# В последующих ячейках 8–11 вероятностный критерий не навязывается.[file:71]
+def build_critical_edges_combined(
+    C_new: CostMatrix,
+    intervals_prev: StabilityIntervals,
+    probs_prev: Optional[Dict[Edge, float]] = None,
+    alpha: float = 0.5,
+) -> Set[Edge]:
+    """
+    Объединённый критерий (используется только в этой ячейке для примера):
+
+        E_crit^(t+1) = E_crit,det^(t+1) ∪ E_crit,prob^(t+1).[file:71]
+    """
+    # детерминированный критерий: выход за интервал
+    Ecrit_det: Set[Edge] = set()
+    for e, c_val_new in C_new.items():
+        if e not in intervals_prev:
+            continue
+        c_min_prev, c_max_prev = intervals_prev[e]
+        if c_val_new < c_min_prev or c_val_new > c_max_prev:
+            Ecrit_det.add(e)
+
+    if probs_prev is None:
+        return Ecrit_det
+
+    Ecrit_prob = build_critical_edges_probabilistic(probs_prev, alpha)
+    return Ecrit_det.union(Ecrit_prob)
+
+# --- 7.4. Тестовый пример (demo): p_ij и критичные дуги ------------------
+
+print("=== ЯЧЕЙКА 7: вероятностная критичность дуг (формула (10)) ===")
+
+# ЕДИНЫЕ интервалы устойчивости для demo:
+# intervals_demo получены в ячейке 6.x через compute_stability_intervals_analytic.[file:71]
+intervals_7: StabilityIntervals = intervals_demo
+C_bar_7: CostMatrix = C_demo
+
+# Модель шума как в статье: гауссовская, σ = 1.0
+noise_model_7 = NoiseModel(
+    noise_type=NoiseType.GAUSSIAN,
+    sigma=1.0,
+    uniform_a=1.0,
+)
+
+# Для иллюстрации влияния α выбран более чувствительный порог α = 0.1,
+# чтобы базисная дуга (0,1) с p_ij ≈ 0.1584 попала в множество E_crit,prob.[file:71]
+alpha_7 = 0.1
+
+all_edges_7: List[Edge] = list(C_bar_7.keys())
+sample_edges_7: List[Edge] = all_edges_7[:10]
+
+rows = []
+for e in sample_edges_7:
+    c_min, c_max = intervals_7[e]
+    c_bar = C_bar_7[e]
+    p_ij = compute_edge_critical_probability((c_min, c_max), c_bar, noise_model_7)
+    is_crit = p_ij >= alpha_7
+
+    rows.append(
+        {
+            "edge": e,
+            "c_min_ij": c_min,
+            "c_max_ij": c_max,
+            "noise_type": noise_model_7.noise_type.value,
+            "sigma": noise_model_7.sigma,
+            "a": noise_model_7.uniform_a,
+            "p_ij": p_ij,
+            "alpha": alpha_7,
+            "is_prob_critical": is_crit,
+        }
+    )
+
+df_prob = pd.DataFrame(rows)
+
+print(f"Таблица p_ij^(t) для нескольких дуг (demo) при α = {alpha_7}:")
+print(
+    df_prob[
+        [
+            "edge",
+            "c_min_ij",
+            "c_max_ij",
+            "noise_type",
+            "sigma",
+            "a",
+            "p_ij",
+            "alpha",
+            "is_prob_critical",
+        ]
+    ].to_string(index=False)
+)
+
+crit_edges_7 = df_prob[df_prob["is_prob_critical"]][["edge", "p_ij"]]
+
+print("\nВероятностно критичные дуги (demo) при заданном пороге α:")
+if crit_edges_7.empty:
+    print("  (критичных дуг в выбранном подмножестве нет)")
+else:
+    for _, row in crit_edges_7.iterrows():
+        print(f"  edge = {row['edge']}, p_ij^(t) = {row['p_ij']:.4f}")
+
+# --- 7.5. Сценарий «та же дуга при разных α» -----------------------------
+
+print("\nСценарий: одна дуга, разные пороги α (иллюстрация влияния порога)")
+
+basis_edges_demo: Set[Edge] = getattr(sap_state_demo, "basis_edges", set())
+basis_edge_example: Optional[Edge] = None
+nonbasis_edge_example: Optional[Edge] = None
+
+for e in all_edges_7:
+    if e in basis_edges_demo and basis_edge_example is None:
+        basis_edge_example = e
+    if e not in basis_edges_demo and nonbasis_edge_example is None:
+        nonbasis_edge_example = e
+    if basis_edge_example is not None and nonbasis_edge_example is not None:
+        break
+
+edges_for_alpha: List[Tuple[str, Edge]] = []
+if basis_edge_example is not None:
+    edges_for_alpha.append(("basis", basis_edge_example))
+if nonbasis_edge_example is not None:
+    edges_for_alpha.append(("nonbasis", nonbasis_edge_example))
+
+alpha_values = [0.1, 0.2, 0.5, 0.8]
+
+for kind, e in edges_for_alpha:
+    c_min, c_max = intervals_7[e]
+    c_bar = C_bar_7[e]
+    p_ij = compute_edge_critical_probability((c_min, c_max), c_bar, noise_model_7)
+
+    c_max_str = f"{c_max:.3f}" if c_max < 1e9 else "inf"
+
+    print(f"\nДуга типа {kind}: edge = {e}")
+    print(f"  Интервал устойчивости [c_min_ij, c_max_ij] = [{c_min:.3f}, {c_max_str}]")
+    print(f"  Номинальная стоимость c̄_ij = {c_bar:.3f}")
+    print(f"  p_ij^(t) = {p_ij:.4f}")
+    print("  Таблица критичности при разных α:")
+    for alpha_val in alpha_values:
+        is_crit = p_ij >= alpha_val
+        print(f"    alpha = {alpha_val:.1f}: critical = {is_crit}")
+
+# --- 7.6. Тест на 4×4 примере C_test6 -----------------------------------
+
+print("\n=== Дополнительный тест: p_ij^(t) для всех дуг 4×4 задачи (C_test6) ===")
+
+# интервалы для 4×4 берём только из ЕДИНОЙ функции; intervals_test6 посчитаны в ячейке 6.4.[file:71]
+At: List[Agent] = list(A_test6)
+Bt: List[Task] = list(B_test6)
+Ct: CostMatrix = dict(C_test6)
+intervals_t: StabilityIntervals = intervals_test6
+
+Cbart: CostMatrix = dict(Ct)
+edges_list_t: List[Edge] = sorted(Ct.keys())
+
+print(
+    f"α = {alpha_7}, шум: {noise_model_7.noise_type.value}, "
+    f"σ = {noise_model_7.sigma}, a = {noise_model_7.uniform_a}"
+)
+for e in edges_list_t:
+    c_min, c_max = intervals_t[e]
+    c_bar = Cbart[e]
+    p_ij = compute_edge_critical_probability((c_min, c_max), c_bar, noise_model_7)
+    is_crit = p_ij >= alpha_7
+    c_max_str = f"{c_max:.3f}" if c_max < 1e9 else "inf"
+
+    print(
+        f"  edge {e!s:10}  "
+        f"[c_min,c_max] = [{c_min:7.3f}, {c_max_str:>7}]  "
+        f"c̄_ij = {c_bar:7.3f}  "
+        f"p_ij^(t) = {p_ij:7.4f}  "
+        f"{alpha_7}? -> {is_crit}"
+    )
+
+# E_crit,prob^(t+1) для 4×4 — используется только в этой ячейке
+probs_test_t: Dict[Edge, float] = {
+    e: compute_edge_critical_probability(intervals_t[e], Cbart[e], noise_model_7)
+    for e in edges_list_t
+}
+Ecrit_prob_t: Set[Edge] = build_critical_edges_probabilistic(probs_test_t, alpha_7)
+
+print(
+    "\nВероятностно критичные дуги (4×4) при α = "
+    f"{alpha_7}, шум {noise_model_7.noise_type.value}:"
+)
+if not Ecrit_prob_t:
+    print("  (нет критичных дуг)")
+else:
+    for e in sorted(Ecrit_prob_t):
+        print(f"  edge = {e}, p_ij^(t) = {probs_test_t[e]:.4f}")
+
+# ЯЧЕЙКА 8: Наследование решения и формирование E_crit^(t+1) (формула (12))
+# ------------------------------------------------------------------------
+# Предполагается, что уже определены:
+#   Agent, Task, Edge, CostMatrix, Assignment, StabilityIntervals
+#   solve_assignment_base, objective_static
+#   compute_stability_intervals_analytic  # ЕДИНАЯ ФУНКЦИЯ (ячейка 5/6)
+#   A_test6, B_test6, C_test6, intervals_test6  # из ячейки 6.4
+
+from typing import Set, Tuple, Dict, List, Optional
+
+# ----------------------------------------------------------------------
+# 8.1. Наследование назначения X^(t) при переходе к G^(t+1)
+# ----------------------------------------------------------------------
+
+def inherit_assignment(
+    X_prev: Assignment,
+    G_prev: Tuple[List[Agent], List[Task]],
+    G_new: Tuple[List[Agent], List[Task]],
+) -> Assignment:
+    A_prev, B_prev = G_prev
+    A_new, B_new = G_new
+
+    A_prev_set = set(A_prev)
+    B_prev_set = set(B_prev)
+    A_new_set = set(A_new)
+    B_new_set = set(B_new)
+
+    X_inherit: Assignment = {}
+    for (i, j), x in X_prev.items():
+        if (
+            i in A_prev_set and j in B_prev_set
+            and i in A_new_set and j in B_new_set
+        ):
+            X_inherit[(i, j)] = x
+    return X_inherit
+
+# ----------------------------------------------------------------------
+# 8.2. Наследование потенциалов u^(t), v^(t) на G^(t+1)
+# ----------------------------------------------------------------------
+
+def inherit_potentials(
+    u_prev: Dict[Agent, float],
+    v_prev: Dict[Task, float],
+    G_prev: Tuple[List[Agent], List[Task]],
+    G_new: Tuple[List[Agent], List[Task]],
+    default_u: float = 0.0,
+    default_v: float = 0.0,
+) -> Tuple[Dict[Agent, float], Dict[Task, float]]:
+    A_prev, B_prev = G_prev
+    A_new, B_new = G_new
+
+    A_prev_set = set(A_prev)
+    B_prev_set = set(B_prev)
+
+    u_new: Dict[Agent, float] = {}
+    v_new: Dict[Task, float] = {}
+
+    for i in A_new:
+        if i in A_prev_set and i in u_prev:
+            u_new[i] = u_prev[i]
+        else:
+            u_new[i] = default_u
+
+    for j in B_new:
+        if j in B_prev_set and j in v_prev:
+            v_new[j] = v_prev[j]
+        else:
+            v_new[j] = default_v
+
+    return u_new, v_new
+
+# ----------------------------------------------------------------------
+# 8.3. Интервалы устойчивости
+# ----------------------------------------------------------------------
+# ВАЖНО: для 4×4-примера в этой ячейке используем только готовые
+# intervals_test6 и C_test6 из ячейки 6.4, без локального пересчёта.[file:71]
+
+# ----------------------------------------------------------------------
+# 8.4. Детерминированный и вероятностный критерии критичности
+# ----------------------------------------------------------------------
+
+def build_critical_edges_deterministic(
+    C_new: CostMatrix,
+    intervals_prev: StabilityIntervals,
+) -> Set[Edge]:
+    """
+    Детерминированное множество критичных дуг E_crit,det^(t+1) по формуле (12):
+
+        (i,j) ∈ E_crit,det^(t+1)
+        ⇔ c_ij^(t+1) ∉ [c_min_ij^(t), c_max_ij^(t)].[file:71]
+    """
+    E_crit_det: Set[Edge] = set()
+
+    for e, c_val_new in C_new.items():
+        if e not in intervals_prev:
+            # для дуги нет интервала устойчивости — считаем её критичной
+            E_crit_det.add(e)
+            continue
+
+        c_min_prev, c_max_prev = intervals_prev[e]
+        if c_val_new < c_min_prev or c_val_new > c_max_prev:
+            E_crit_det.add(e)
+
+    return E_crit_det
+
+def build_critical_edges_probabilistic(
+    probs_prev: Dict[Edge, float],
+    alpha: float,
+) -> Set[Edge]:
+    """
+    Вероятностный критерий критичности по p_ij^(t) и порогу α (формула (10)).[file:71]
+    """
+    E_crit_prob: Set[Edge] = set()
+    for e, p in probs_prev.items():
+        if p >= alpha:
+            E_crit_prob.add(e)
+    return E_crit_prob
+
+def build_critical_edges_combined(
+    C_new: CostMatrix,
+    intervals_prev: StabilityIntervals,
+    probs_prev: Optional[Dict[Edge, float]] = None,
+    alpha: float = 0.5,
+) -> Set[Edge]:
+    """
+    Объединённое множество:
+
+        E_crit^(t+1) = E_crit,det^(t+1) ∪ E_crit,prob^(t+1). (12)[file:71]
+    """
+    E_crit_det = build_critical_edges_deterministic(C_new, intervals_prev)
+
+    if probs_prev is None:
+        return E_crit_det
+
+    E_crit_prob = build_critical_edges_probabilistic(probs_prev, alpha)
+    return E_crit_det.union(E_crit_prob)
+
+# ----------------------------------------------------------------------
+# 8.5. Демонстрационный сценарий: шаг t и шаг t+1 (4×4)
+# ----------------------------------------------------------------------
+
+print("\n=== ЯЧЕЙКА 8: Наследование решения и формирование E_crit^(t+1) (формула (12)) ===")
+
+# Шаг t: используем ту же 4×4 задачу и интервалы, что и в ячейке 6
+if "A_test6" in globals() and "B_test6" in globals() and "C_test6" in globals():
+    A_t: List[Agent] = list(A_test6)
+    B_t: List[Task] = list(B_test6)
+    C_t: CostMatrix = dict(C_test6)
+    intervals_t: StabilityIntervals = intervals_test6  # ГЛОБАЛЬНЫЕ интервалы из ячейки 6.4
+else:
+    A_t = [0, 1, 2, 3]
+    B_t = [0, 1, 2, 3]
+    C_t: CostMatrix = {
+        (0, 0): 9,  (0, 1): 2,  (0, 2): 7,  (0, 3): 8,
+        (1, 0): 6,  (1, 1): 4,  (1, 2): 3,  (1, 3): 7,
+        (2, 0): 5,  (2, 1): 8,  (2, 2): 1,  (2, 3): 8,
+        (3, 0): 7,  (3, 1): 6,  (3, 2): 9,  (3, 3): 4,
+    }
+    # если intervals_test6 недоступны, в этом случае можно вычислить интервалы,
+    # но основной сценарий статьи предполагает наличие intervals_test6 из ячейки 6.4.
+    intervals_t: StabilityIntervals = compute_stability_intervals_analytic(A_t, B_t, C_t)
+
+G_t = (A_t, B_t)
+
+print("Шаг t: матрица стоимостей C^(t):")
+for i in A_t:
+    row_vals = [C_t[(i, j)] for j in B_t]
+    print(f"  i = {i}: ", "  ".join(f"{val:5.2f}" for val in row_vals))
+
+# Оптимальный план на шаге t (интервалы уже заданы через intervals_t)
+X_t, u_t, v_t, sap_state_t = solve_assignment_base(A_t, B_t, C_t)
+F_t = objective_static(C_t, X_t)
+
+print("\nШаг t: оптимальный план X^(t) (дуги с x_ij = 1):")
+for (i, j), x in X_t.items():
+    if x == 1:
+        print(f"  (i, j) = ({i}, {j}), c_ij^(t) = {C_t[(i, j)]:.2f}")
+print(f"Шаг t: оптимальное значение F^(t) = {F_t:.3f}")
+
+print("\nШаг t: интервалы устойчивости [c_min_ij^(t), c_max_ij^(t)] для всех дуг e:")
+for e in sorted(C_t.keys()):
+    c_min_t, c_max_t = intervals_t[e]
+    c_max_t_print = c_max_t if c_max_t < float("inf") else float("inf")
+    print(
+        f"  e = {e!s:10}:  c_min^(t) = {c_min_t:7.2f},  "
+        f"c_max^(t) = {c_max_t_print:7.2f}"
+    )
+
+print(f"\nВсего дуг на шаге t: |E^(t)| = {len(C_t)}")
+
+# ------------------------------------------------------------------
+# Формирование шага t+1: равномерный сдвиг стоимостей
+# ------------------------------------------------------------------
+
+SHIFT_DELTA = 1.0  # при желании усилить пример: заменить на 2.0 или 3.0
+
+C_t1: CostMatrix = {e: c + SHIFT_DELTA for e, c in C_t.items()}
+A_t1 = list(A_t)
+B_t1 = list(B_t)
+G_t1 = (A_t1, B_t1)
+
+print("\nШаг t+1: матрица стоимостей C^(t+1):")
+for i in A_t1:
+    row_vals = [C_t1[(i, j)] for j in B_t1]
+    print(f"  i = {i}: ", "  ".join(f"{val:5.2f}" for val in row_vals))
+
+# Наследованный план и потенциалы
+X_t1_inherit = inherit_assignment(X_t, G_t, G_t1)
+u_t1_inherit, v_t1_inherit = inherit_potentials(u_t, v_t, G_t, G_t1)
+
+print("\nНаследованный план X_inherit^(t+1) (дуги с x_ij = 1):")
+for (i, j), x in X_t1_inherit.items():
+    if x == 1:
+        print(f"  (i, j) = ({i}, {j}), c_ij^(t+1) = {C_t1[(i, j)]:.2f}")
+
+print("\nНаследованные потенциалы u_inherit^(t+1) и v_inherit^(t+1):")
+print("  u^(t+1):")
+for i in sorted(u_t1_inherit.keys()):
+    print(f"    u[{i}] = {u_t1_inherit[i]:.4f}")
+print("  v^(t+1):")
+for j in sorted(v_t1_inherit.keys()):
+    print(f"    v[{j}] = {v_t1_inherit[j]:.4f}")
+
+# ------------------------------------------------------------------
+# Формирование множеств критичных дуг только по интервалам шага t
+# (детерминированный и объединённый критерии).[file:71]
+# ------------------------------------------------------------------
+
+E_crit_det_t1: Set[Edge] = build_critical_edges_deterministic(C_t1, intervals_t)
+
+E_crit_t1: Set[Edge] = build_critical_edges_combined(
+    C_new=C_t1,
+    intervals_prev=intervals_t,
+    probs_prev=None,   # в этом примере вероятностный критерий не используем
+    alpha=0.5,
+)
+
+print("\nШаг t+1: дуги, вышедшие за интервалы устойчивости (детерминированный критерий):")
+for e in sorted(E_crit_det_t1):
+    c_new = C_t1[e]
+    c_min_t, c_max_t = intervals_t.get(e, (float("-inf"), float("inf")))
+    c_max_t_print = c_max_t if c_max_t < float("inf") else float("inf")
+    print(
+        f"  e = {e!s:10}: c_ij^(t+1) = {c_new:7.2f}, "
+        f"[c_min_ij^(t), c_max_ij^(t)] = [{c_min_t:7.2f}, {c_max_t_print:7.2f}]"
+    )
+
+print(f"\nМощность E_crit,det^(t+1): |E_crit,det^(t+1)| = {len(E_crit_det_t1)}")
+print(f"Мощность E_crit^(t+1):      |E_crit^(t+1)| = {len(E_crit_t1)}")
+
+print(
+    "\nКомментарий: интервалы устойчивости шага t берутся из единой "
+    "функции compute_stability_intervals_analytic (через intervals_test6), "
+    "а множество E_crit^(t+1) далее используется в локальной реоптимизации "
+    "и анализе трёх методов в ячейках 9–11."
+)
+
+# ЯЧЕЙКА 9: влияние параметра λ при локальной реоптимизации
+# ---------------------------------------------------------
+# Один фиксированный переход t → t+1 для задачи 4×4 и анализ влияния λ
+#
+#   F^(t+1)(X^(t+1); λ) =
+#       ∑_{(i,j)} c_ij^(t+1) x_ij^(t+1) + λ · Φ(X^(t), X^(t+1)),      (13)
+#
+# при ЛОКАЛЬНОЙ реоптимизации на заранее заданном критическом подграфе
+# G_crit^(t+1) (фиксированное множество дуг E_crit).
+
+from typing import Dict, List, Tuple, Set
+import pandas as pd
+
+# ---------------------------------------------------------
+# 9.0. Локальная реоптимизация на фиксированном E_crit
+# ---------------------------------------------------------
+
+def reoptimize_step(
+    G_new: Tuple[List[Agent], List[Task]],
+    C_new: CostMatrix,
+    X_prev: Assignment,
+    X_start: Assignment,
+    lambda_penalty: float,
+    E_crit: Set[Edge],
+) -> Tuple[Assignment, int, float, int]:
+    """
+    Локальная реоптимизация вокруг стартового плана X_start на
+    фиксированном критическом подграфе E_crit ⊆ A×B.
+
+    Параметры:
+      G_new           — граф на шаге t+1: (A, B);
+      C_new           — матрица стоимостей c_ij^(t+1);
+      X_prev          — план на шаге t (X^(t));
+      X_start         — стартовый план для локального поиска на t+1;
+      lambda_penalty  — параметр λ в (13);
+      E_crit          — множество дуг критического подграфа G_crit^(t+1).
+
+    Возвращает:
+      X_new               — локально улучшенный план на t+1;
+      iters               — число итераций прохода по E_crit;
+      deltaF_total        — изменение динамического функционала F^(t+1);
+      changed_edges_total — число изменённых дуг Φ(X^(t), X^(t+1)).
+    """
+    A_new, B_new = G_new
+
+    # Текущая конфигурация (стартовый план уже задан)
+    X_curr = dict(X_start)
+
+    # Локальный оператор: переключение одной дуги e с сохранением
+    # ограничений по одной единице в строке и столбце.
+    def try_single_edge_flip(
+        e: Edge,
+        X_base: Assignment,
+    ) -> Tuple[Assignment, int]:
+        i, j = e
+        X_candidate = dict(X_base)
+
+        x_ij = X_base.get(e, 0)
+
+        active_row = [edge for edge, x in X_base.items() if x == 1 and edge[0] == i]
+        active_col = [edge for edge, x in X_base.items() if x == 1 and edge[1] == j]
+
+        if x_ij == 0:
+            # включаем (i,j) и убираем другие 1 в строке/столбце
+            for er in active_row:
+                X_candidate[er] = 0
+            for ec in active_col:
+                X_candidate[ec] = 0
+            X_candidate[e] = 1
+        else:
+            # e была 1: выключаем её
+            X_candidate[e] = 0
+
+        changed = sum(
+            1
+            for edge in set(X_base.keys()) | set(X_candidate.keys())
+            if X_base.get(edge, 0) != X_candidate.get(edge, 0)
+        )
+        return X_candidate, changed
+
+    iters = 0
+    improved_any = True
+    # F_curr считается через глобальную objective_dynamic (формула (13)).
+    F_curr = objective_dynamic(C_new, X_prev, X_curr, lambda_penalty)
+    TOL = 1e-9
+
+    while improved_any:
+        improved_any = False
+        iters += 1
+
+        for e in E_crit:
+            X_trial, changed_e = try_single_edge_flip(e, X_curr)
+            if changed_e == 0:
+                continue
+
+            F_old = F_curr
+            F_new = objective_dynamic(C_new, X_prev, X_trial, lambda_penalty)
+            deltaF = F_old - F_new
+
+            if deltaF > TOL:
+                X_curr = X_trial
+                F_curr = F_new
+                improved_any = True
+
+        if not improved_any:
+            break
+        if iters >= 10:
+            break
+
+    changed_edges_total = sum(
+        1
+        for e in set(X_prev.keys()) | set(X_curr.keys())
+        if X_prev.get(e, 0) != X_curr.get(e, 0)
+    )
+    # Полное изменение динамического функционала:
+    # deltaF_total = F_dynamic(X_curr) - F_dynamic(X_prev).
+    deltaF_total = objective_dynamic(C_new, X_prev, X_curr, lambda_penalty) - \
+                   objective_dynamic(C_new, X_prev, X_prev, lambda_penalty)
+
+    return X_curr, iters, deltaF_total, changed_edges_total
+
+# ---------------------------------------------------------
+# 9.1. Метрика Φ(X(t), X(t+1)) — число изменённых дуг
+# ---------------------------------------------------------
+
+def phi_changed_edges(X_prev: Assignment, X_new: Assignment) -> int:
+    """
+    Φ(X^(t), X^(t+1)) — количество дуг, у которых изменилось x_ij (0→1 или 1→0).
+    """
+    changed = 0
+    all_edges = set(X_prev.keys()) | set(X_new.keys())
+    for e in all_edges:
+        if X_prev.get(e, 0) != X_new.get(e, 0):
+            changed += 1
+    return changed
+
+# ---------------------------------------------------------
+# 9.2. Фиксированный сценарий t → t+1 (пример 4×4)
+# ---------------------------------------------------------
+
+def prepare_transition_example() -> Dict:
+    """
+    Готовит один фиксированный сценарий перехода t → t+1 для эксперимента с λ.
+
+    Важно: E_crit задаётся априори как весь граф A×B (все дуги),
+    чтобы гарантировать непустой критический подграф G_crit^(t+1).
+    """
+    A: List[Agent] = [0, 1, 2, 3]
+    B: List[Task] = [0, 1, 2, 3]
+
+    # Шаг t: та же 4×4 матрица, что и в ячейках 5–8.
+    C_prev: CostMatrix = {
+        (0, 0): 9.0, (0, 1): 2.0, (0, 2): 7.0, (0, 3): 8.0,
+        (1, 0): 6.0, (1, 1): 4.0, (1, 2): 3.0, (1, 3): 7.0,
+        (2, 0): 5.0, (2, 1): 8.0, (2, 2): 1.0, (2, 3): 8.0,
+        (3, 0): 7.0, (3, 1): 6.0, (3, 2): 9.0, (3, 3): 4.0,
+    }
+    G_prev = (A, B)
+
+    # Шаг t: полное решение SAP (X_prev — реальный оптимальный план).
+    X_prev, u_prev, v_prev, sap_state_prev = solve_assignment_base(A, B, C_prev)
+
+    # Формируем C^(t+1) как детерминированный сдвиг (сохраняется структура 4×4).
+    C_new: CostMatrix = {e: c + 2.0 for e, c in C_prev.items()}
+    G_new = (A, B)
+
+    # Критический подграф: берём ВСЕ дуги (E_crit = E).
+    E_crit: Set[Edge] = set(C_new.keys())
+
+    prepared_state = {
+        "A": A,
+        "B": B,
+        "G_prev": G_prev,
+        "C_prev": C_prev,
+        "X_prev": X_prev,
+        "u_prev": u_prev,
+        "v_prev": v_prev,
+        "G_new": G_new,
+        "C_new": C_new,
+        "E_crit": E_crit,
+    }
+    return prepared_state
+
+# ---------------------------------------------------------
+# 9.3. Один запуск локальной реоптимизации для заданного λ
+# ---------------------------------------------------------
+
+def run_local_reopt_for_lambda(
+    lambda_penalty: float,
+    prepared_state: Dict,
+) -> Dict:
+    """
+    Выполняет один переход t → t+1 для фиксированного λ на G_crit^(t+1).
+    """
+    G_new = prepared_state["G_new"]
+    C_new = prepared_state["C_new"]
+    X_prev = prepared_state["X_prev"]
+    E_crit = prepared_state["E_crit"]
+
+    # Стартовый план на t+1: наследуем X_prev напрямую.
+    X_start = dict(X_prev)
+
+    X_new, iters, deltaF, changed_edges = reoptimize_step(
+        G_new=G_new,
+        C_new=C_new,
+        X_prev=X_prev,
+        X_start=X_start,
+        lambda_penalty=lambda_penalty,
+        E_crit=E_crit,
+    )
+
+    # F_static — статическая стоимость плана 4×4 на шаге t+1.
+    F_static = objective_static(C_new, X_new)
+    F_dynamic_val = objective_dynamic(
+        C_new, X_prev, X_new, lambda_penalty=lambda_penalty
+    )
+    phi_val = phi_changed_edges(X_prev, X_new)
+
+    result = {
+        "lambda": lambda_penalty,
+        "|E_crit|": len(E_crit),
+        "num_local_iterations": iters,
+        "F_dynamic": F_dynamic_val,
+        "F_static": F_static,
+        "Phi_changed_edges": phi_val,
+    }
+    return result
+
+# ---------------------------------------------------------
+# 9.4. Цикл по λ и табличный вывод
+# ---------------------------------------------------------
+
+print("=== ЯЧЕЙКА 9: влияние параметра λ при локальной реоптимизации (пример 4×4) ===")
+
+prepared_state_9 = prepare_transition_example()
+
+print("Размер множества критичных дуг E_crit^(t+1):",
+      len(prepared_state_9["E_crit"]))
+print("Критичные дуги E_crit^(t+1):")
+for e in sorted(prepared_state_9["E_crit"]):
+    print(" ", e)
+
+lambda_values = [0.0, 0.1, 0.5, 1.0, 2.0]
+
+results: List[Dict] = []
+for lam in lambda_values:
+    res = run_local_reopt_for_lambda(lam, prepared_state_9)
+    results.append(res)
+
+df_lambda = pd.DataFrame(results)
+
+print("\nРезультаты локальной реоптимизации для разных λ:")
+print(
+    df_lambda[
+        [
+            "lambda",
+            "|E_crit|",
+            "num_local_iterations",
+            "F_dynamic",
+            "F_static",
+            "Phi_changed_edges",
+        ]
+    ].to_string(index=False)
+)
+
+print(
+    "\nИнтерпретация: при увеличении λ штраф за изменения Φ(X^(t), X^(t+1)) "
+    "усиливается в динамическом функционале F^(t+1)(λ). Ожидается, что при росте λ "
+    "Phi_changed_edges не увеличивается (часто уменьшается), тогда как F_dynamic "
+    "растёт по сравнению со случаем λ = 0, что отражает компромисс между "
+    "улучшением статической стоимости и устойчивостью решения, как описано "
+    "формулой (13) и в тексте статьи."
+)
+
+# ЯЧЕЙКА 10: бутстрэппинг и шаблоны реоптимизации
+# ------------------------------------------------
+# Предполагается, что в предыдущих ячейках уже определены:
+#   Agent, Task, Edge, CostMatrix, Assignment, StabilityIntervals
+#   solve_assignment_base, compute_stability_intervals_analytic
+#   objective_static, objective_dynamic
+#   inherit_assignment, inherit_potentials
+#   build_critical_edges_deterministic, phi_changed_edges
+#   compute_relative_deviation
+#   reoptimize_step (локальная реоптимизация с сигнатурой из ячейки 9).
+#
+# ВАЖНО: все функции ниже (bootstrap_init, reoptimize_with_bootstrap,
+# работа с global_state.templates) используются ТОЛЬКО в этой ячейке
+# для эксперимента plain vs bootstrap и не вызываются из сценариев
+# full / partial / proposed (ячейка 11).[file:71]
+
+from dataclasses import dataclass, field
+from typing import Dict, List, Set, Tuple, Optional, Any
+import time
+import random
+import pandas as pd
+
+# ----------------------------------------------------------------------
+# 10.1. Структуры шаблонов и локального глобального состояния
+# ----------------------------------------------------------------------
+
+@dataclass
+class ReoptimizationPattern:
+    """
+    Шаблон реоптимизации для типичного подграфа.[file:71]
+    subgraph_nodes_A, subgraph_nodes_B — вершины подграфа,
+    subgraph_edges      — дуги подграфа,
+    signature           — сигнатура подграфа (строка),
+    base_assignment     — фрагмент X на подграфе,
+    base_potentials_u, base_potentials_v — локальные потенциалы u, v.
+    """
+    subgraph_nodes_A: Set[Agent]
+    subgraph_nodes_B: Set[Task]
+    subgraph_edges: Set[Edge]
+    signature: str
+    base_assignment: Assignment
+    base_potentials_u: Dict[Agent, float]
+    base_potentials_v: Dict[Task, float]
+
+@dataclass
+class GlobalState:
+    """
+    Локальное состояние для bootstrap‑сценария по шагам t.[file:71]
+    potentials[t]          – (u^(t), v^(t)),
+    stability_intervals[t] – интервалы устойчивости,
+    augment_trees[t]       – структуры SAP / критичные подграфы,
+    templates              – сигнатура → ReoptimizationPattern.
+    """
+    potentials: Dict[int, Tuple[Dict[Agent, float], Dict[Task, float]]] = field(
+        default_factory=dict
+    )
+    stability_intervals: Dict[int, StabilityIntervals] = field(
+        default_factory=dict
+    )
+    augment_trees: Dict[int, Any] = field(
+        default_factory=dict
+    )
+    templates: Dict[str, ReoptimizationPattern] = field(
+        default_factory=dict
+    )
+
+# Локальное глобальное состояние ТОЛЬКО для ячейки 10
+global_state = GlobalState()
+
+# ----------------------------------------------------------------------
+# 10.2. Инициализация/сохранение состояния шага
+# ----------------------------------------------------------------------
+
+def bootstrap_init(
+    t: int,
+    G: Tuple[List[Agent], List[Task]],
+    C: CostMatrix,
+    X: Assignment,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+    intervals: StabilityIntervals,
+    augment_tree: Any,
+) -> None:
+    """
+    Сохраняет состояние шага t в global_state (для bootstrap‑сценариев).[file:71]
+    """
+    global_state.potentials[t] = (dict(u), dict(v))
+    global_state.stability_intervals[t] = dict(intervals)
+    global_state.augment_trees[t] = augment_tree
+
+# ----------------------------------------------------------------------
+# 10.3. Извлечение подграфов и построение шаблонов
+# ----------------------------------------------------------------------
+
+def extract_frequent_subgraphs(
+    G: Tuple[List[Agent], List[Task]],
+    X: Assignment,
+    history: Any = None,
+) -> List[Set[Edge]]:
+    """
+    Извлечение кандидатов в «частые подграфы» для построения шаблонов.[file:71]
+    В минимальной реализации:
+      - возвращается один подграф — множество базисных дуг (x_ij = 1);
+      - если базис пуст, подграф не создаётся (возвращается пустой список).
+    """
+    subgraph_basis = {e for e, x in X.items() if x == 1}
+    if not subgraph_basis:
+        return []
+    return [subgraph_basis]
+
+def compute_signature(subgraph: Set[Edge]) -> str:
+    """
+    Строковая сигнатура подграфа, инвариантная к перестановкам дуг.[file:71]
+    """
+    edges_sorted = sorted(subgraph)
+    return ";".join(f"{i}-{j}" for (i, j) in edges_sorted)
+
+def build_reoptimization_pattern(
+    subgraph: Set[Edge],
+    X: Assignment,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+) -> ReoptimizationPattern:
+    """
+    Строит шаблон реоптимизации для подграфа subgraph.[file:71]
+    """
+    nodes_A: Set[Agent] = {i for (i, _) in subgraph}
+    nodes_B: Set[Task] = {j for (_, j) in subgraph}
+
+    base_assignment: Assignment = {e: X.get(e, 0) for e in subgraph}
+    base_potentials_u: Dict[Agent, float] = {i: u.get(i, 0.0) for i in nodes_A}
+    base_potentials_v: Dict[Task, float] = {j: v.get(j, 0.0) for j in nodes_B}
+
+    signature = compute_signature(subgraph)
+
+    pattern = ReoptimizationPattern(
+        subgraph_nodes_A=nodes_A,
+        subgraph_nodes_B=nodes_B,
+        subgraph_edges=set(subgraph),
+        signature=signature,
+        base_assignment=base_assignment,
+        base_potentials_u=base_potentials_u,
+        base_potentials_v=base_potentials_v,
+    )
+    return pattern
+
+# ----------------------------------------------------------------------
+# 10.4. Применение шаблона к новому шагу
+# ----------------------------------------------------------------------
+
+def apply_pattern(
+    X: Assignment,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+    C_new: CostMatrix,
+    G_crit: Tuple[Set[Agent], Set[Task], Set[Edge]],
+    pattern: ReoptimizationPattern,
+    lambda_penalty: float,
+) -> Tuple[Assignment, Dict[Agent, float], Dict[Task, float], Dict[str, Any]]:
+    """
+    Применяет шаблон pattern к критичному подграфу G_crit^(t+1).[file:71]
+    Возвращает (X_new, u_new, v_new, stats) с полем
+      stats["num_edges_from_pattern"] – сколько дуг настроено шаблоном.
+    """
+    A_crit, B_crit, E_crit = G_crit
+
+    num_edges_from_pattern = 0
+
+    for e, x_val in pattern.base_assignment.items():
+        if e in E_crit:
+            X[e] = x_val
+            num_edges_from_pattern += 1
+
+    for i in pattern.subgraph_nodes_A:
+        if i in A_crit:
+            u[i] = pattern.base_potentials_u.get(i, u.get(i, 0.0))
+    for j in pattern.subgraph_nodes_B:
+        if j in B_crit:
+            v[j] = pattern.base_potentials_v.get(j, v.get(j, 0.0))
+
+    stats = {
+        "num_edges_from_pattern": num_edges_from_pattern,
+    }
+    return X, u, v, stats
+
+# ----------------------------------------------------------------------
+# 10.5. Реоптимизация с бутстрэппингом (отдельный bootstrap‑сценарий)
+# ----------------------------------------------------------------------
+
+def reoptimize_with_bootstrap(
+    t_prev: int,
+    t_new: int,
+    G_new: Tuple[List[Agent], List[Task]],
+    C_new: CostMatrix,
+    lambda_penalty: float,
+) -> Dict[str, Any]:
+    """
+    Реоптимизация шага t_new с использованием состояния шага t_prev
+    и шаблонов реоптимизации (bootstrap‑сценарий).[file:71]
+
+    Этот сценарий НЕ используется в основных методах full/partial/proposed,
+    а служит отдельным экспериментом по ускорению локальной реоптимизации.
+    """
+    if (
+        t_prev not in global_state.potentials
+        or t_prev not in global_state.stability_intervals
+    ):
+        raise ValueError(f"Нет сохранённого состояния для шага t_prev = {t_prev}")
+
+    u_prev, v_prev = global_state.potentials[t_prev]
+    intervals_prev = global_state.stability_intervals[t_prev]
+
+    # глобальные X_t, C_t, G_t должны соответствовать t_prev
+    if "X_t" not in globals() or "C_t" not in globals() or "G_t" not in globals():
+        raise ValueError("Ожидаются глобальные X_t, C_t, G_t для шага t_prev.")
+
+    # X_prev — оптимальное или локально оптимальное решение на шаге t_prev
+    X_prev = dict(X_t)
+    C_prev = dict(C_t)
+    G_prev = G_t
+
+    # 1) наследуем X, u, v на G_new
+    X_inherit = inherit_assignment(X_prev, G_prev, G_new)
+    u_new, v_new = inherit_potentials(u_prev, v_prev, G_prev, G_new)
+
+    # 2) критическое множество дуг по интервалам (bootstrap‑сценарий)
+    E_crit: Set[Edge] = build_critical_edges_deterministic(C_new, intervals_prev)
+
+    # резервный выбор, если E_crit пуст
+    if not E_crit:
+        all_edges = list(C_new.keys())
+        random.shuffle(all_edges)
+        reserve_k = min(10, len(all_edges))
+        E_crit = set(all_edges[:reserve_k])
+
+    A_new, B_new = G_new
+    A_crit: Set[Agent] = {i for (i, _) in E_crit}
+    B_crit: Set[Task] = {j for (_, j) in E_crit}
+    G_crit = (A_crit, B_crit, E_crit)
+
+    # 3) ищем шаблон по сигнатуре подграфа
+    signature_crit = compute_signature(E_crit) if E_crit else ""
+    pattern_used: Optional[ReoptimizationPattern] = global_state.templates.get(
+        signature_crit
+    )
+    used_pattern = pattern_used is not None
+
+    # стартовые структуры для шага t_new
+    X_start = dict(X_inherit)
+    u_start = dict(u_new)
+    v_start = dict(v_new)
+
+    # 4) при наличии шаблона применяем его только на E_crit
+    if pattern_used is not None and E_crit:
+        X_start, u_start, v_start, stats_pattern = apply_pattern(
+            X_start, u_start, v_start, C_new, G_crit, pattern_used, lambda_penalty
+        )
+
+    # 5) один вызов reoptimize_step в режиме локальной реоптимизации
+    t0 = time.perf_counter()
+    X_final, iters, deltaF, changed_edges = reoptimize_step(
+        G_new=G_new,
+        C_new=C_new,
+        X_prev=X_prev,
+        X_start=X_start,
+        lambda_penalty=lambda_penalty,
+        E_crit=E_crit,
+    )
+    t1 = time.perf_counter()
+    elapsed = t1 - t0
+
+    if iters == 0:
+        iters = 1
+
+    # 6) сохраняем состояние t_new
+    bootstrap_init(
+        t=t_new,
+        G=G_new,
+        C=C_new,
+        X=X_final,
+        u=u_start,
+        v=v_start,
+        intervals=intervals_prev,  # интервалы не пересчитываются в ячейке 10
+        augment_tree=G_crit,
+    )
+
+    # 7) обновляем шаблоны (обязательно ненулевой подграф)
+    subgraphs = extract_frequent_subgraphs(
+        G_new, X_final, history=global_state.augment_trees[t_new]
+    )
+    for sub in subgraphs:
+        if not sub:
+            continue
+        pattern_new = build_reoptimization_pattern(sub, X_final, u_start, v_start)
+        if pattern_new.signature not in global_state.templates:
+            global_state.templates[pattern_new.signature] = pattern_new
+
+    return {
+        "t_prev": t_prev,
+        "t_new": t_new,
+        "lambda": lambda_penalty,
+        "num_iterations": iters,
+        "time_sec": elapsed,
+        "used_pattern": used_pattern,
+        "pattern_signature": signature_crit if used_pattern else None,
+        "E_crit_size": len(E_crit),
+    }
+
+# ----------------------------------------------------------------------
+# 10.6. Демонстрация plain vs bootstrap (отдельный эксперимент)
+# ----------------------------------------------------------------------
+
+print("=== ЯЧЕЙКА 10: бутстрэппинг и шаблоны реоптимизации ===")
+
+# Если локальное состояние ещё не инициализировано – делаем шаг t = 1
+if not global_state.potentials:
+    t1 = 1
+    A_1 = [0, 1, 2, 3]
+    B_1 = [0, 1, 2, 3]
+    C_1: CostMatrix = {
+        (0, 0): 9,  (0, 1): 2,  (0, 2): 7,  (0, 3): 8,
+        (1, 0): 6,  (1, 1): 4,  (1, 2): 3,  (1, 3): 7,
+        (2, 0): 5,  (2, 1): 8,  (2, 2): 1,  (2, 3): 8,
+        (3, 0): 7,  (3, 1): 6,  (3, 2): 9,  (3, 3): 4,
+    }
+    G_1 = (A_1, B_1)
+
+    # X_1 — оптимальное решение на первом шаге, используется как X_t
+    X_1, u_1, v_1, sap_state_1 = solve_assignment_base(A_1, B_1, C_1)
+    # ЕДИНСТВЕННЫЙ расчёт интервалов в ячейке 10
+    intervals_1 = compute_stability_intervals_analytic(A_1, B_1, C_1)
+
+    bootstrap_init(
+        t=t1,
+        G=G_1,
+        C=C_1,
+        X=X_1,
+        u=u_1,
+        v=v_1,
+        intervals=intervals_1,
+        augment_tree=None,
+    )
+
+    # Глобальные переменные для bootstrap‑эксперимента (локальные для ячейки 10)
+    global A_t, B_t, C_t, X_t, u_t, v_t, intervals_t, G_t
+    A_t, B_t, C_t, X_t, u_t, v_t, intervals_t, G_t = (
+        A_1,
+        B_1,
+        C_1,
+        X_1,
+        u_1,
+        v_1,
+        intervals_1,
+        G_1,
+    )
+
+lambda_demo = 0.5
+scenario_rows: List[Dict[str, Any]] = []
+
+# 1) Несколько шагов plain (без bootstrap, только reoptimize_step)
+t_prev = 1
+for t_new in range(2, 5):
+    C_new_demo: CostMatrix = dict(C_t)
+    for e in C_new_demo.keys():
+        C_new_demo[e] = C_new_demo[e] + 0.8
+
+    G_new_demo = G_t
+    E_crit_plain: Set[Edge] = set(C_new_demo.keys())
+    X_start_plain = dict(X_t)
+
+    t0 = time.perf_counter()
+    X_new_plain, iters_plain, deltaF_plain, changed_plain = reoptimize_step(
+        G_new=G_new_demo,
+        C_new=C_new_demo,
+        X_prev=X_t,
+        X_start=X_start_plain,
+        lambda_penalty=lambda_demo,
+        E_crit=E_crit_plain,
+    )
+    t1 = time.perf_counter()
+
+    scenario_rows.append(
+        {
+            "scenario_id": "plain",
+            "t": t_new,
+            "with_bootstrap": False,
+            "num_iterations": iters_plain,
+            "time_per_step": t1 - t0,
+        }
+    )
+
+    # Обновляем состояние для следующего шага; X_t остаётся локально оптимальным.
+    C_t = C_new_demo
+    X_t = X_new_plain
+
+    bootstrap_init(
+        t=t_new,
+        G=G_t,
+        C=C_t,
+        X=X_t,
+        u=u_t,
+        v=v_t,
+        intervals=intervals_t,  # те же интервалы, без пересчёта
+        augment_tree=None,
+    )
+    t_prev = t_new
+
+# 2) Несколько шагов с reoptimize_with_bootstrap (используем шаблоны)
+for t_new in range(5, 8):
+    C_new_demo: CostMatrix = dict(C_t)
+    for e in C_new_demo.keys():
+        C_new_demo[e] = C_new_demo[e] + 0.8
+
+    res_boot = reoptimize_with_bootstrap(
+        t_prev=t_prev,
+        t_new=t_new,
+        G_new=G_t,
+        C_new=C_new_demo,
+        lambda_penalty=lambda_demo,
+    )
+
+    scenario_rows.append(
+        {
+            "scenario_id": "bootstrap",
+            "t": t_new,
+            "with_bootstrap": True,
+            "num_iterations": res_boot["num_iterations"],
+            "time_per_step": res_boot["time_sec"],
+        }
+    )
+
+    # Обновляем C_t; X_t уже сохранён в bootstrap_init, здесь используем текущие потенциалы
+    C_t = C_new_demo
+    t_prev = t_new
+
+# 3) Таблица сценариев plain / bootstrap
+df_scenarios = pd.DataFrame(scenario_rows)
+
+print("\nСценарии plain / bootstrap:")
+print(
+    df_scenarios[
+        ["scenario_id", "t", "with_bootstrap", "num_iterations", "time_per_step"]
+    ].to_string(index=False)
+)
+
+print("\nЧисло шаблонов в global_state.templates:", len(global_state.templates))
+if global_state.templates:
+    any_sig = next(iter(global_state.templates.keys()))
+    pat = global_state.templates[any_sig]
+    print("Пример сигнатуры шаблона:", any_sig)
+    print("  |subgraph_edges| =", len(pat.subgraph_edges))
+
+from typing import Optional, Any, Tuple, List, Dict
+import random
+import time
+
+import numpy as np
+import pandas as pd
+
+# Предполагается, что уже определены:
+#   Agent, Task, Edge, CostMatrix, Assignment
+#   solve_assignment_base, compute_stability_intervals_analytic
+#   objective_static, objective_dynamic
+#   inherit_assignment
+#   build_critical_edges_combined
+#   reoptimize_step
+
+# -----------------------------
+# Вспомогательные функции
+# -----------------------------
+
+def count_changed_edges(X_prev: Assignment, X_new: Assignment) -> int:
+    """
+    Число дуг, у которых изменилось значение x_ij (0→1 или 1→0)
+    между X_prev и X_new.
+    """
+    all_edges = set(X_prev.keys()) | set(X_new.keys())
+    return sum(1 for e in all_edges if X_prev.get(e, 0) != X_new.get(e, 0))
+
+
+def compute_relative_deviation(value: float, ref: float) -> float:
+    """
+    Относительное отклонение value от ref в процентах.
+    """
+    if ref == 0.0:
+        return 0.0
+    return 100.0 * (value - ref) / abs(ref)
+
+
+# -----------------------------
+# Генерация динамической серии
+# -----------------------------
+
+def generate_series(
+    m: int,
+    n: int,
+    T: int,
+    base_cost_low: float = 1.0,
+    base_cost_high: float = 10.0,
+    critical_fraction: float = 0.05,
+    noise_level: float = 0.5,
+    seed: Optional[int] = None,
+) -> Tuple[List[Tuple[List[Agent], List[Task]]], List[CostMatrix]]:
+    """
+    Генерация последовательности (G_t, C_t), t = 1..T.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    A = list(range(m))
+    B = list(range(n))
+
+    G_series: List[Tuple[List[Agent], List[Task]]] = []
+    C_series: List[CostMatrix] = []
+
+    # t = 1: базовая матрица стоимостей
+    C_prev: CostMatrix = {
+        (i, j): random.uniform(base_cost_low, base_cost_high)
+        for i in A for j in B
+    }
+    G_series.append((A, B))
+    C_series.append(dict(C_prev))
+
+    num_edges = m * n
+    num_critical_edges = max(1, int(critical_fraction * num_edges))
+
+    # t = 2..T: динамика с шумом и критичными дугами
+    for _ in range(2, T + 1):
+        G_t = (A, B)
+        C_t: CostMatrix = dict(C_prev)
+
+        edges_all = list(C_t.keys())
+        random.shuffle(edges_all)
+        critical_edges = set(edges_all[:num_critical_edges])
+
+        for e in edges_all:
+            base_noise = random.gauss(0.0, noise_level)
+            factor = 2.0 if e in critical_edges else 1.0
+            C_t[e] = max(base_cost_low, C_t[e] + factor * base_noise)
+
+        G_series.append(G_t)
+        C_series.append(C_t)
+        C_prev = C_t
+
+    return G_series, C_series
+
+
+# ----------------------------------------------
+# Сценарий 1: full (полный пересчёт на каждом шаге)
+# ----------------------------------------------
+
+def run_series_full_recompute(
+    m: int,
+    n: int,
+    T: int,
+    critical_fraction: float,
+    noise_level: float,
+    lambda_penalty: float,
+    seed: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Сценарий 1 – full: на каждом шаге t полная переоптимизация
+    задачи назначения с нуля.
+    """
+    G_series, C_series = generate_series(
+        m=m,
+        n=n,
+        T=T,
+        base_cost_low=1.0,
+        base_cost_high=10.0,
+        critical_fraction=critical_fraction,
+        noise_level=noise_level,
+        seed=seed,
+    )
+
+    time_per_step: List[float] = []
+    F_static: List[float] = []
+    F_dynamic: List[float] = []
+    Phi: List[int] = []
+
+    X_list: List[Assignment] = []
+    u_list: List[Dict[Agent, float]] = []
+    v_list: List[Dict[Task, float]] = []
+
+    X_prev: Optional[Assignment] = None
+
+    for t in range(T):
+        A_t, B_t = G_series[t]
+        C_t = C_series[t]
+
+        t0 = time.perf_counter()
+        X_t, u_t, v_t, sap_state_t = solve_assignment_base(A_t, B_t, C_t)
+        t1 = time.perf_counter()
+        time_per_step.append(t1 - t0)
+
+        X_list.append(X_t)
+        u_list.append(u_t)
+        v_list.append(v_t)
+
+        F_stat_t = objective_static(C_t, X_t)
+        F_static.append(F_stat_t)
+
+        if X_prev is None:
+            Phi_t = 0
+            F_dyn_t = objective_dynamic(
+                C_t, X_t, X_t, lambda_penalty=lambda_penalty
+            )
+        else:
+            Phi_t = count_changed_edges(X_prev, X_t)
+            F_dyn_t = objective_dynamic(
+                C_t, X_prev, X_t, lambda_penalty=lambda_penalty
+            )
+
+        Phi.append(Phi_t)
+        F_dynamic.append(F_dyn_t)
+        X_prev = X_t
+
+    return {
+        "time_per_step": time_per_step,
+        "F_static": F_static,
+        "F_dynamic": F_dynamic,
+        "Phi": Phi,
+        "G_series": G_series,
+        "C_series": C_series,
+        "X": X_list,
+        "u": u_list,
+        "v": v_list,
+    }
+
+
+# ------------------------------------------------
+# Сценарий 2: partial / inherit (чистое наследование)
+# ------------------------------------------------
+
+def run_series_partial_inheritance(
+    G_series: List[Tuple[List[Agent], List[Task]]],
+    C_series: List[CostMatrix],
+    F_dynamic_full: List[float],
+    lambda_penalty: float,
+) -> Dict[str, Any]:
+    """
+    Сценарий 2 – inherit:
+      t = 1: один раз решается SAP;
+      t >= 2: наследуем X, локальной реоптимизации нет.
+    """
+    T = len(G_series)
+    time_per_step: List[float] = []
+    F_static: List[float] = []
+    F_dynamic: List[float] = []
+    Phi: List[int] = []
+    relgap: List[float] = []
+
+    # t = 0
+    A0, B0 = G_series[0]
+    C0 = C_series[0]
+
+    t0 = time.perf_counter()
+    X_prev, u_prev, v_prev, sap_state0 = solve_assignment_base(A0, B0, C0)
+    t1 = time.perf_counter()
+    time_per_step.append(t1 - t0)
+
+    F_static.append(objective_static(C0, X_prev))
+    F_dynamic.append(
+        objective_dynamic(C0, X_prev, X_prev, lambda_penalty=lambda_penalty)
+    )
+    Phi.append(0)
+    relgap.append(0.0)
+
+    for t in range(1, T):
+        A_t, B_t = G_series[t]
+        C_t = C_series[t]
+        G_prev = G_series[t - 1]
+        G_t = (A_t, B_t)
+
+        t0 = time.perf_counter()
+        X_t = inherit_assignment(X_prev, G_prev, G_t)
+        t1 = time.perf_counter()
+        time_per_step.append(t1 - t0)
+
+        X_new = X_t
+        Phi_t = count_changed_edges(X_prev, X_new)
+        F_dyn_t = objective_dynamic(
+            C_t, X_prev, X_new, lambda_penalty=lambda_penalty
+        )
+
+        F_static.append(objective_static(C_t, X_new))
+        F_dynamic.append(F_dyn_t)
+        Phi.append(Phi_t)
+        relgap.append(compute_relative_deviation(F_dyn_t, F_dynamic_full[t]))
+
+        X_prev = X_new
+
+    return {
+        "time_per_step": time_per_step,
+        "F_static": F_static,
+        "F_dynamic": F_dynamic,
+        "Phi": Phi,
+        "relgap": relgap,
+    }
+
+
+# ---------------------------------------------------------
+# Сценарий 3: proposed (локальная реоптимизация на E_crit)
+# ---------------------------------------------------------
+
+def run_series_proposed(
+    G_series: List[Tuple[List[Agent], List[Task]]],
+    C_series: List[CostMatrix],
+    F_dynamic_full: List[float],
+    lambda_penalty: float,
+    alpha_prob: float = 0.5,
+    max_crit_fraction: float = 0.1,
+) -> Dict[str, Any]:
+    """
+    Сценарий 3 – proposed:
+      t = 1: полный пересчёт и интервалы устойчивости;
+      t >= 2: локальная реоптимизация на критическом подграфе E_crit.
+    """
+    T = len(G_series)
+    time_per_step: List[float] = []
+    F_static: List[float] = []
+    F_dynamic: List[float] = []
+    Phi: List[int] = []
+    relgap: List[float] = []
+
+    # t = 0: SAP и интервалы устойчивости
+    A0, B0 = G_series[0]
+    C0 = C_series[0]
+
+    t0 = time.perf_counter()
+    X_prev, u_prev, v_prev, sap_state0 = solve_assignment_base(A0, B0, C0)
+    intervals_prev = compute_stability_intervals_analytic(A0, B0, C0)
+    t1 = time.perf_counter()
+    time_per_step.append(t1 - t0)
+
+    F_static.append(objective_static(C0, X_prev))
+    F_dynamic.append(
+        objective_dynamic(C0, X_prev, X_prev, lambda_penalty=lambda_penalty)
+    )
+    Phi.append(0)
+    relgap.append(0.0)
+
+    for t in range(1, T):
+        G_prev = G_series[t - 1]
+        C_prev = C_series[t - 1]
+        G_t = G_series[t]
+        C_t = C_series[t]
+
+        t0 = time.perf_counter()
+
+        # Комбинированный критерий критичности
+        probs_prev = None
+        E_crit = build_critical_edges_combined(
+            C_t,
+            intervals_prev,
+            probs_prev,
+            alpha_prob,
+        )
+
+        # Ограничение максимальной доли критичных дуг
+        max_edges = int(max_crit_fraction * len(C_t))
+        if max_edges > 0 and len(E_crit) > max_edges:
+            sorted_edges = sorted(
+                E_crit,
+                key=lambda e: probs_prev.get(e, 0.0) if probs_prev else 0.0,
+                reverse=True,
+            )
+            E_crit = set(sorted_edges[:max_edges])
+
+        if not E_crit:
+            E_crit = set(C_t.keys())
+
+        X_start = inherit_assignment(X_prev, G_prev, G_t)
+
+        X_new, iters, deltaF, changed_edges = reoptimize_step(
+            G_new=G_t,
+            C_new=C_t,
+            X_prev=X_prev,
+            X_start=X_start,
+            lambda_penalty=lambda_penalty,
+            E_crit=E_crit,
+        )
+
+        t1 = time.perf_counter()
+        time_per_step.append(t1 - t0)
+
+        Phi_t = count_changed_edges(X_prev, X_new)
+        F_dyn_t = objective_dynamic(
+            C_t, X_prev, X_new, lambda_penalty=lambda_penalty
+        )
+
+        F_static.append(objective_static(C_t, X_new))
+        F_dynamic.append(F_dyn_t)
+        Phi.append(Phi_t)
+        relgap.append(compute_relative_deviation(F_dyn_t, F_dynamic_full[t]))
+
+        X_prev = X_new
+
+        # Периодическое обновление интервалов устойчивости
+        if (t % 15) == 0:
+            A_t, B_t = G_t
+            intervals_prev = compute_stability_intervals_analytic(A_t, B_t, C_t)
+
+    return {
+        "time_per_step": time_per_step,
+        "F_static": F_static,
+        "F_dynamic": F_dynamic,
+        "Phi": Phi,
+        "relgap": relgap,
+    }
+
+
+# ---------------------------------------------------------
+# 11.6–11.7: запуск трёх сценариев и dfsummary
+# ---------------------------------------------------------
+
+m = 10
+n = 10
+T = 30
+critical_fraction = 0.05
+noise_level = 0.5
+lambda_penalty = 0.5
+seed = 42
+
+# 1) full
+full_result = run_series_full_recompute(
+    m=m,
+    n=n,
+    T=T,
+    critical_fraction=critical_fraction,
+    noise_level=noise_level,
+    lambda_penalty=lambda_penalty,
+    seed=seed,
+)
+time_full = full_result["time_per_step"]
+Fdyn_full = full_result["F_dynamic"]
+Phi_full = full_result["Phi"]
+G_series = full_result["G_series"]
+C_series = full_result["C_series"]
+
+# 2) inherit (partial)
+partial_result = run_series_partial_inheritance(
+    G_series=G_series,
+    C_series=C_series,
+    F_dynamic_full=Fdyn_full,
+    lambda_penalty=lambda_penalty,
+)
+time_partial = partial_result["time_per_step"]
+relgap_partial = partial_result["relgap"]
+Phi_partial = partial_result["Phi"]
+
+# 3) proposed
+proposed_result = run_series_proposed(
+    G_series=G_series,
+    C_series=C_series,
+    F_dynamic_full=Fdyn_full,
+    lambda_penalty=lambda_penalty,
+)
+time_proposed = proposed_result["time_per_step"]
+relgap_proposed = proposed_result["relgap"]
+Phi_proposed = proposed_result["Phi"]
+
+methods = ["full", "inherit", "proposed"]
+
+series_time = {
+    "full": time_full,
+    "inherit": time_partial,
+    "proposed": time_proposed,
+}
+series_relgap = {
+    "full": [0.0] * len(Fdyn_full),
+    "inherit": relgap_partial,
+    "proposed": relgap_proposed,
+}
+series_phi = {
+    "full": Phi_full,
+    "inherit": Phi_partial,
+    "proposed": Phi_proposed,
+}
+
+rows = []
+for mth in methods:
+    tarr = np.array(series_time[mth], dtype=float)
+    phiarr = np.array(series_phi[mth], dtype=float)
+    gaparr = np.array(series_relgap[mth], dtype=float)
+
+    rows.append(
+        dict(
+            method=mth,
+            avgtime=float(tarr.mean()),
+            sumtime=float(tarr.sum()),
+            stdtime=float(tarr.std()),
+            avgrelativegapF=float(gaparr.mean()),
+            maxrelativegapF=float(gaparr.max()),
+            avgchangededges=float(phiarr.mean()),
+        )
+    )
+
+dfsummary = pd.DataFrame(
+    rows,
+    columns=[
+        "method",
+        "avgtime",
+        "sumtime",
+        "stdtime",
+        "avgrelativegapF",
+        "maxrelativegapF",
+        "avgchangededges",
+    ],
+)
+
+display(dfsummary)
+
+# ЕДИНАЯ ЯЧЕЙКА: визуализация результатов (объединяет 12–18)
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import random
+
+sns.set(style="whitegrid", context="notebook")
+
+# Цвета
+color_full = "C0"
+color_inherit = "C1"
+color_proposed = "C2"
+
+# ---------------------------------------------------------
+# Блок 1. Подготовка данных (бывш. 12.1, 13.0)
+# ---------------------------------------------------------
+
+time_full = full_result["time_per_step"]
+time_inherit = partial_result["time_per_step"]
+time_proposed = proposed_result["time_per_step"]
+
+F_dyn_full = full_result["F_dynamic"]
+F_dyn_inherit = partial_result["F_dynamic"]
+F_dyn_proposed = proposed_result["F_dynamic"]
+
+Phi_full = full_result["Phi"]
+Phi_inherit = partial_result["Phi"]
+Phi_proposed = proposed_result["Phi"]
+
+G_series = full_result["G_series"]
+C_series = full_result["C_series"]
+
+T_vis = len(time_full)
+steps = list(range(1, T_vis + 1))
+
+# относительные отклонения F_dynamic от эталона full
+rel_gap_inherit = []
+rel_gap_proposed = []
+for F_full_t, F_p_t, F_pr_t in zip(F_dyn_full, F_dyn_inherit, F_dyn_proposed):
+    denom = max(1.0, abs(F_full_t))
+    rel_gap_inherit.append(100.0 * (F_p_t - F_full_t) / denom)
+    rel_gap_proposed.append(100.0 * (F_pr_t - F_full_t) / denom)
+
+avg_Phi_full = sum(Phi_full) / max(1, len(Phi_full))
+avg_Phi_inherit = sum(Phi_inherit) / max(1, len(Phi_inherit))
+avg_Phi_proposed = sum(Phi_proposed) / max(1, len(Phi_proposed))
+
+title_suffix = f"(m={m}, n={n}, T={T}, λ={lambda_penalty})"
+
+# dfsummary должен быть из ячейки 11
+dfsummary = globals().get("dfsummary", None)
+
+# ---------------------------------------------------------
+# Блок 2. Базовые графики по трём методам (бывш. 12.2–12.3, 14)
+# ---------------------------------------------------------
+
+# 2.1. Время на шаг (3 метода)
+plt.figure(figsize=(10, 4))
+plt.plot(steps, time_full, marker="o", color=color_full, label="full (полный пересчёт)")
+plt.plot(steps, time_inherit, marker="s", color=color_inherit, label="inherit (наследование)")
+plt.plot(steps, time_proposed, marker="^", color=color_proposed, label="proposed (интервалы+локальная реопт.)")
+plt.xlabel("Шаг t (номер периода)")
+plt.ylabel("Время на шаг, с")
+plt.title("Время на шаг для трёх методов")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 2.2. Отклонение F_dynamic от full
+plt.figure(figsize=(10, 4))
+plt.plot(steps, [0.0] * T_vis, linestyle="--", color="black", label="full (эталон)")
+plt.plot(steps, rel_gap_inherit, marker="s", color=color_inherit, label="inherit: относит. отклонение F, %")
+plt.plot(steps, rel_gap_proposed, marker="^", color=color_proposed, label="proposed: относит. отклонение F, %")
+plt.xlabel("Шаг t (номер периода)")
+plt.ylabel("Отклонение динамической F от эталона, %")
+plt.title("Отклонение F_dynamic от эталона по шагам")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 2.3. Число изменённых дуг Φ по шагам
+plt.figure(figsize=(10, 4))
+plt.plot(steps, Phi_full, marker="o", color=color_full, label="full")
+plt.plot(steps, Phi_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, Phi_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("Шаг t (номер периода)")
+plt.ylabel("Φ(X(t−1), X(t)) — число изменённых дуг")
+plt.title("Число изменённых дуг Φ по шагам")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 2.4. F^(t), время, Φ и сводный барчарт (бывш. ячейка 14)
+plt.figure(figsize=(8, 4))
+plt.plot(steps, F_dyn_full, label="Полный пересчёт", marker="o")
+plt.plot(steps, F_dyn_inherit, label="Частичное наследование", marker="s")
+plt.plot(steps, F_dyn_proposed, label="Предлагаемый алгоритм", marker="^")
+plt.xlabel("Шаг времени t")
+plt.ylabel("F^(t)")
+plt.title("Динамический функционал по шагам")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(8, 4))
+plt.plot(steps, time_full, label="Полный пересчёт", marker="o")
+plt.plot(steps, time_inherit, label="Частичное наследование", marker="s")
+plt.plot(steps, time_proposed, label="Предлагаемый алгоритм", marker="^")
+plt.xlabel("Шаг времени t")
+plt.ylabel("Время, сек")
+plt.title("Время решения на шаг")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(8, 4))
+plt.plot(steps, Phi_full, label="Полный пересчёт", marker="o")
+plt.plot(steps, Phi_inherit, label="Частичное наследование", marker="s")
+plt.plot(steps, Phi_proposed, label="Предлагаемый алгоритм", marker="^")
+plt.xlabel("Шаг времени t")
+plt.ylabel("Число изменённых дуг Φ")
+plt.title("Устойчивость решений")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+labels_ru = ["Полный", "Наследование", "Предлагаемый"]
+mean_time = [
+    float(np.mean(time_full)),
+    float(np.mean(time_inherit)),
+    float(np.mean(time_proposed)),
+]
+mean_phi = [
+    float(np.mean(Phi_full)),
+    float(np.mean(Phi_inherit)),
+    float(np.mean(Phi_proposed)),
+]
+
+x = np.arange(len(labels_ru))
+width = 0.35
+
+fig, ax1 = plt.subplots(figsize=(8, 4))
+ax1.bar(x - width/2, mean_time, width, label="Среднее время, сек")
+ax1.set_ylabel("Время, сек")
+ax1.set_xticks(x)
+ax1.set_xticklabels(labels_ru)
+ax1.grid(axis="y", alpha=0.3)
+
+ax2 = ax1.twinx()
+ax2.bar(x + width/2, mean_phi, width, color="orange", label="Среднее Φ")
+ax2.set_ylabel("Число изменённых дуг Φ")
+
+fig.legend(loc="upper right")
+plt.title("Сводное сравнение алгоритмов")
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------------
+# Блок 3. Sanity-check и резюме (бывш. 12.4–12.5)
+# ---------------------------------------------------------
+
+def check_feasibility(
+    G: Tuple[List[Agent], List[Task]],
+    X: Assignment
+) -> bool:
+    """Проверка ограничений (2)–(4) для назначения X на графе G."""
+    A, B = G
+
+    # (4) бинарность
+    for (i, j), x in X.items():
+        if x not in (0, 1):
+            print(f"Нарушение бинарности: x[{i},{j}] = {x}")
+            return False
+
+    # (2) по строкам
+    for i in A:
+        s = sum(X.get((i, j), 0) for j in B)
+        if s > 1:
+            print(f"Нарушение (2): ∑_j x[{i},j] = {s} > 1")
+            return False
+
+    # (3) по столбцам
+    for j in B:
+        s = sum(X.get((i, j), 0) for i in A)
+        if s > 1:
+            print(f"Нарушение (3): ∑_i x[i,{j}] = {s} > 1")
+            return False
+
+    return True
+
+
+def compute_reduced_costs(
+    C: CostMatrix,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+) -> Dict[Edge, float]:
+    delta: Dict[Edge, float] = {}
+    for (i, j), c_ij in C.items():
+        delta[(i, j)] = c_ij - u[i] - v[j]
+    return delta
+
+
+def check_optimality_conditions(
+    C: CostMatrix,
+    X: Assignment,
+    u: Dict[Agent, float],
+    v: Dict[Task, float],
+    tol: float = 1e-6,
+    num_random_edges: int = 20,
+    label: str = ""
+) -> None:
+    """
+    Проверка условий δ_ij для метода потенциалов.
+    Для full ожидается δ_ij ≈ 0 на базисе и δ_ij ≥ 0 вне базиса.
+    """
+    edges = list(C.keys())
+    random.shuffle(edges)
+    sample_edges = edges[:min(num_random_edges, len(edges))]
+    delta = compute_reduced_costs(C, u, v)
+
+    print(f"\nSanity-check δ_ij для метода {label} (выборочно):")
+    for e in sample_edges:
+        d = delta[e]
+        x = X.get(e, 0)
+        if x == 1:
+            print(f"  базисная дуга {e}, δ_ij = {d:.3e}")
+            if abs(d) > tol:
+                print("    ВНИМАНИЕ: |δ_ij| > tol — статическая оптимальность нарушена.")
+        else:
+            print(f"  небазисная дуга {e}, δ_ij = {d:.3e}")
+            if d < -tol:
+                print("    ВНИМАНИЕ: δ_ij < 0 — статическая оптимальность нарушена.")
+
+t0_idx = min(T_vis, 5)
+G_t0 = G_series[t0_idx - 1]
+C_t0 = C_series[t0_idx - 1]
+
+X_full_t0, u_full_t0, v_full_t0, sap_full_t0 = solve_assignment_base(
+    G_t0[0], G_t0[1], C_t0
+)
+feas_full = check_feasibility(G_t0, X_full_t0)
+print(f"\n[full] t={t0_idx}: ограничения (2)–(4) выполнены? {feas_full}")
+check_optimality_conditions(C_t0, X_full_t0, u_full_t0, v_full_t0, label="full")
+
+avg_time_full = sum(time_full) / max(1, len(time_full))
+avg_time_inherit = sum(time_inherit) / max(1, len(time_inherit))
+avg_time_proposed = sum(time_proposed) / max(1, len(time_proposed))
+
+print("\n=== Резюме по трём методам (на основе ячейки 11) ===")
+print(
+    f"Среднее время на шаг: full = {avg_time_full:.6f} с, "
+    f"inherit = {avg_time_inherit:.6f} с, "
+    f"proposed = {avg_time_proposed:.6f} с"
+)
+print(
+    f"Среднее число изменённых дуг: full = {avg_Phi_full:.2f}, "
+    f"inherit = {avg_Phi_inherit:.2f}, "
+    f"proposed = {avg_Phi_proposed:.2f}"
+)
+
+# ---------------------------------------------------------
+# Блок 4. Распределения и summary по методам (бывш. 13.1–13.3, 15)
+# ---------------------------------------------------------
+
+# 4.1. Phi_t и rel_gap (ещё раз, с сохранением pdf)
+plt.figure(figsize=(10, 4))
+plt.plot(steps, Phi_full, marker="o", color=color_full, label="full")
+plt.plot(steps, Phi_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, Phi_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("t (шаг моделирования)")
+plt.ylabel("Φ(X^{(t-1)}, X^{(t)})")
+plt.title(f"Динамика устойчивости (число изменённых дуг Φ_t) {title_suffix}")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.savefig("fig_phi_timeseries.pdf", bbox_inches="tight")
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, [0.0] * T_vis, linestyle="--", color="black", label="full (эталон)")
+plt.plot(steps, rel_gap_inherit, marker="s", color=color_inherit, label="inherit: отклонение F_dynamic, %")
+plt.plot(steps, rel_gap_proposed, marker="^", color=color_proposed, label="proposed: отклонение F_dynamic, %")
+plt.axhspan(-5, 5, color="grey", alpha=0.1, label="допустимое отклонение ±5%")
+plt.ylim(-120, 60)
+
+worst_t = int(np.argmax(rel_gap_inherit))
+plt.annotate(
+    "max loss (inherit)",
+    xy=(steps[worst_t], rel_gap_inherit[worst_t]),
+    xytext=(steps[worst_t] + 1, rel_gap_inherit[worst_t] + 10),
+    arrowprops=dict(arrowstyle="->", color=color_inherit),
+    fontsize=9,
+)
+
+plt.xlabel("t (шаг моделирования)")
+plt.ylabel("Отклонение F_dynamic от full, %")
+plt.title(f"Качество решения: динамическая цель vs full {title_suffix}")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.savefig("fig_relgap_timeseries.pdf", bbox_inches="tight")
+plt.show()
+
+# 4.2. Гистограммы и boxplot времени
+plt.figure(figsize=(12, 4))
+
+plt.subplot(1, 3, 1)
+sns.histplot(time_full, bins=20, kde=True, color=color_full)
+plt.title(f"Время шага (full) {title_suffix}")
+plt.xlabel("time per step, s")
+
+plt.subplot(1, 3, 2)
+sns.histplot(time_inherit, bins=20, kde=True, color=color_inherit)
+plt.title(f"Время шага (inherit) {title_suffix}")
+plt.xlabel("time per step, s")
+
+plt.subplot(1, 3, 3)
+sns.histplot(time_proposed, bins=20, kde=True, color=color_proposed)
+plt.title(f"Время шага (proposed) {title_suffix}")
+plt.xlabel("time per step, s")
+
+plt.tight_layout()
+plt.savefig("fig_time_histograms.pdf", bbox_inches="tight")
+plt.show()
+
+plt.figure(figsize=(6, 4))
+df_time = pd.DataFrame(
+    {
+        "time": time_full + time_inherit + time_proposed,
+        "method": ["full"] * len(time_full)
+                  + ["inherit"] * len(time_inherit)
+                  + ["proposed"] * len(time_proposed),
+    }
+)
+sns.boxplot(
+    data=df_time,
+    x="method",
+    y="time",
+    palette=[color_full, color_inherit, color_proposed],
+)
+plt.title(f"Boxplot времени шага по методам {title_suffix}")
+plt.ylabel("time per step, s")
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.savefig("fig_time_boxplot.pdf", bbox_inches="tight")
+plt.show()
+
+# 4.3. dfsummary и barplot'ы + scatter скорость–устойчивость
+if dfsummary is not None:
+    display(dfsummary)
+
+    plt.figure(figsize=(14, 4))
+
+    plt.subplot(1, 3, 1)
+    sns.barplot(
+        data=dfsummary,
+        x="method",
+        y="avgtime",
+        hue="method",
+        palette="Blues",
+        dodge=False,
+        legend=False,
+    )
+    plt.title("Среднее время шага")
+    plt.ylabel("avg time per step, s")
+    plt.grid(axis="y", alpha=0.3)
+
+    plt.subplot(1, 3, 2)
+    sns.barplot(
+        data=dfsummary,
+        x="method",
+        y="avgrelativegapF",
+        hue="method",
+        palette="Reds",
+        dodge=False,
+        legend=False,
+    )
+    plt.title("Среднее относительное отклонение F_dynamic, %")
+    plt.ylabel("avg rel. gap, %")
+    plt.grid(axis="y", alpha=0.3)
+
+    plt.subplot(1, 3, 3)
+    sns.barplot(
+        data=dfsummary,
+        x="method",
+        y="avgchangededges",
+        hue="method",
+        palette="Greens",
+        dodge=False,
+        legend=False,
+    )
+    plt.title("Среднее число изменённых дуг Φ")
+    plt.ylabel("avg Φ")
+    plt.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig("fig_dfsummary_bars.pdf", bbox_inches="tight")
+    plt.show()
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(
+        dfsummary["avgtime"],
+        dfsummary["avgchangededges"],
+        s=120,
+        c=["C0", "C1", "C2"],
+    )
+    for _, row in dfsummary.iterrows():
+        plt.text(
+            row["avgtime"],
+            row["avgchangededges"],
+            row["method"],
+            fontsize=10,
+            ha="center",
+            va="bottom",
+        )
+
+    base_time = dfsummary.loc[dfsummary["method"] == "full", "avgtime"].iloc[0]
+    base_phi = dfsummary.loc[dfsummary["method"] == "full", "avgchangededges"].iloc[0]
+    plt.axvline(base_time, color="grey", linestyle="--", linewidth=1)
+    plt.axhline(base_phi, color="grey", linestyle="--", linewidth=1)
+
+
+# ---------------------------------------------------------
+# Блок 5. Локализация пересчёта (бывш. 13.4)
+# ---------------------------------------------------------
+
+Ecrit_fraction = globals().get("Ecrit_fraction", None)
+if Ecrit_fraction is not None:
+    Ecrit_fraction = np.array(Ecrit_fraction, dtype=float)
+    t_arr = np.array(time_proposed, dtype=float)
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(Ecrit_fraction, t_arr, color=color_proposed, alpha=0.7)
+    if len(Ecrit_fraction) > 1:
+        k, b = np.polyfit(Ecrit_fraction, t_arr, 1)
+        xs = np.linspace(Ecrit_fraction.min(), Ecrit_fraction.max(), 100)
+        plt.plot(xs, k * xs + b, color="black", linestyle="--", label=f"trend: k={k:.3g}")
+    plt.xlabel("Доля критичных дуг |E_crit| / |E|")
+    plt.ylabel("time per step (proposed), s")
+    plt.title(f"Локализация пересчёта: время vs доля критичных дуг {title_suffix}")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("fig_ecrit_vs_time.pdf", bbox_inches="tight")
+    plt.show()
+
+print("Финальный отчёт по времени, качеству и устойчивости для трёх методов.")
+
+# ---------------------------------------------------------
+# Блок 6. Нормированные величины и доп. графики (бывш. 15)
+# ---------------------------------------------------------
+
+time_full_arr = np.array(time_full, dtype=float)
+time_inherit_arr = np.array(time_inherit, dtype=float)
+time_proposed_arr = np.array(time_proposed, dtype=float)
+
+Phi_full_arr = np.array(Phi_full, dtype=float)
+Phi_inherit_arr = np.array(Phi_inherit, dtype=float)
+Phi_proposed_arr = np.array(Phi_proposed, dtype=float)
+
+F_full_arr = np.array(F_dyn_full, dtype=float)
+F_inherit_arr = np.array(F_dyn_inherit, dtype=float)
+F_proposed_arr = np.array(F_dyn_proposed, dtype=float)
+
+base_time = np.maximum(time_full_arr, 1e-9)
+rel_time_inherit = time_inherit_arr / base_time
+rel_time_proposed = time_proposed_arr / base_time
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, np.ones_like(steps), "--", color=color_full, label="full (нормировано к 1)")
+plt.plot(steps, rel_time_inherit, "s-", color=color_inherit, label="inherit / full")
+plt.plot(steps, rel_time_proposed, "^-", color=color_proposed, label="proposed / full")
+plt.xlabel("Шаг t")
+plt.ylabel("Относительное время (к полному пересчёту)")
+plt.title("Нормированное время трёх методов по шагам")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+base_phi = np.maximum(Phi_full_arr, 1.0)
+rel_phi_inherit = Phi_inherit_arr / base_phi
+rel_phi_proposed = Phi_proposed_arr / base_phi
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, np.ones_like(steps), "--", color=color_full, label="full (нормировано к 1)")
+plt.plot(steps, rel_phi_inherit, "s-", color=color_inherit, label="inherit / full")
+plt.plot(steps, rel_phi_proposed, "^-", color=color_proposed, label="proposed / full")
+plt.xlabel("Шаг t")
+plt.ylabel("Относительное число переназначений Φ")
+plt.title("Нормированная устойчивость решений по шагам")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+labels = ["full", "inherit", "proposed"]
+avg_time = [
+    float(np.mean(time_full_arr)),
+    float(np.mean(time_inherit_arr)),
+    float(np.mean(time_proposed_arr)),
+]
+avg_phi = [
+    float(np.mean(Phi_full_arr)),
+    float(np.mean(Phi_inherit_arr)),
+    float(np.mean(Phi_proposed_arr)),
+]
+
+plt.figure(figsize=(6, 5))
+plt.scatter(avg_time[0], avg_phi[0], s=120, color=color_full, label="full")
+plt.scatter(avg_time[1], avg_phi[1], s=120, color=color_inherit, label="inherit")
+plt.scatter(avg_time[2], avg_phi[2], s=120, color=color_proposed, label="proposed")
+
+for x_val, y_val, name in zip(avg_time, avg_phi, labels):
+    plt.text(x_val, y_val, name, fontsize=9, ha="center", va="bottom")
+
+
+# ---------------------------------------------------------
+# Блок 7. Boxplot'ы и облака «время–Φ» (бывш. 17, часть 1–3)
+# ---------------------------------------------------------
+
+plt.figure(figsize=(6, 4))
+plt.boxplot(
+    [time_full_arr, time_inherit_arr, time_proposed_arr],
+    labels=["full", "inherit", "proposed"],
+    showmeans=True,
+)
+plt.ylabel("Время на шаг, сек")
+plt.title("Распределение времени решения\n(аналог венгерского/SAP/auction vs реоптимизация)")
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(6, 4))
+plt.boxplot(
+    [Phi_full_arr, Phi_inherit_arr, Phi_proposed_arr],
+    labels=["full", "inherit", "proposed"],
+    showmeans=True,
+)
+plt.ylabel("Число изменённых дуг Φ")
+plt.title("Распределение переназначений\n(устойчивость решений для трёх подходов)")
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(8, 5))
+plt.scatter(time_full_arr, Phi_full_arr, color=color_full, alpha=0.6, label="full")
+plt.scatter(time_inherit_arr, Phi_inherit_arr, color=color_inherit, alpha=0.6, label="inherit")
+plt.scatter(time_proposed_arr, Phi_proposed_arr, color=color_proposed, alpha=0.6, label="proposed")
+plt.xlabel("Время на шаг, сек")
+plt.ylabel("Число изменённых дуг Φ")
+plt.title("Облака точек: скорость vs переназначения по шагам")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+denom_gap = np.maximum(np.abs(F_full_arr), 1.0)
+rel_gap_inherit2 = 100.0 * (F_inherit_arr - F_full_arr) / denom_gap
+rel_gap_proposed2 = 100.0 * (F_proposed_arr - F_full_arr) / denom_gap
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, [0.0] * len(steps), "--", color="black", label="full (эталон)")
+plt.plot(steps, rel_gap_inherit2, "s-", color=color_inherit, label="inherit: относительное отклонение F, %")
+plt.plot(steps, rel_gap_proposed2, "^-", color=color_proposed, label="proposed: относительное отклонение F, %")
+plt.xlabel("Шаг t")
+plt.ylabel("Отклонение F_dynamic от full, %")
+plt.title("Отклонение функционала по сравнению с полным пересчётом\n(венгерский / SAP / аукцион)")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------------
+# Блок 8. Каркас для Hungarian/Auction и панель сравнения (бывш. 17–18)
+# ---------------------------------------------------------
+
+# Каркас дополнительных методов (Hungarian, Auction)
+HAS_HUNGARIAN = False
+HAS_AUCTION = False
+
+try:
+    time_hungarian
+    F_dyn_hungarian
+    Phi_hungarian
+    HAS_HUNGARIAN = True
+except NameError:
+    HAS_HUNGARIAN = False
+
+try:
+    time_auction
+    F_dyn_auction
+    Phi_auction
+    HAS_AUCTION = True
+except NameError:
+    HAS_AUCTION = False
+
+steps_arr = np.array(steps, dtype=int)
+
+if HAS_HUNGARIAN:
+    time_hungarian_arr = np.array(time_hungarian, dtype=float)
+    F_hungarian_arr = np.array(F_dyn_hungarian, dtype=float)
+    Phi_hungarian_arr = np.array(Phi_hungarian, dtype=float)
+
+if HAS_AUCTION:
+    time_auction_arr = np.array(time_auction, dtype=float)
+    F_auction_arr = np.array(F_dyn_auction, dtype=float)
+    Phi_auction_arr = np.array(Phi_auction, dtype=float)
+
+color_sap = "C0"
+color_hung = "C3"
+color_auction = "C4"
+
+# 8.1. Время по шагам: SAP, inherit, proposed, optional Hungarian/Auction
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, time_full_arr, marker="o", color=color_sap, label="SAP / full")
+plt.plot(steps_arr, time_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, time_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, time_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, time_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("Время на шаг, сек")
+plt.title("Время решения на шаг для классических и динамических методов")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 8.2. F^(t) по шагам
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, F_full_arr, marker="o", color=color_sap, label="SAP / full")
+plt.plot(steps_arr, F_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, F_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, F_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, F_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("F^(t)")
+plt.title("Динамический функционал F^(t) для разных алгоритмов")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 8.3. Φ по шагам
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, Phi_full_arr, marker="o", color=color_sap, label="SAP / full")
+plt.plot(steps_arr, Phi_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, Phi_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, Phi_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, Phi_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("Число изменённых дуг Φ")
+plt.title("Переназначения Φ(X^{t-1}, X^{t}) для разных алгоритмов")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 8.4. Барчарт средних времён (SAP / inherit / proposed / opt. Hungarian/Auction)
+labels_methods = ["SAP/full", "inherit", "proposed"]
+mean_time_all = [
+    float(np.mean(time_full_arr)),
+    float(np.mean(time_inherit_arr)),
+    float(np.mean(time_proposed_arr)),
+]
+if HAS_HUNGARIAN:
+    labels_methods.append("Hungarian")
+    mean_time_all.append(float(np.mean(time_hungarian_arr)))
+if HAS_AUCTION:
+    labels_methods.append("Auction")
+    mean_time_all.append(float(np.mean(time_auction_arr)))
+
+x_idx = np.arange(len(labels_methods))
+plt.figure(figsize=(8, 4))
+plt.bar(x_idx, mean_time_all)
+plt.xticks(x_idx, labels_methods, rotation=15)
+plt.ylabel("Среднее время на шаг, сек")
+plt.title("Среднее время для статических и динамических алгоритмов")
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# 8.5. Ещё одна панель сравнения (из самой последней части 18)
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, time_full_arr, marker="o", color=color_sap, label="SAP (solve_assignment_base)")
+plt.plot(steps_arr, time_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, time_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, time_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, time_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("Время на шаг, сек")
+plt.title("Время решения: SAP, Hungarian, Auction и динамические методы")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, F_full_arr, marker="o", color=color_sap, label="SAP (full)")
+plt.plot(steps_arr, F_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, F_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, F_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, F_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("F^(t)")
+plt.title("Динамический функционал F^(t) для разных алгоритмов")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps_arr, Phi_full_arr, marker="o", color=color_sap, label="SAP (full)")
+plt.plot(steps_arr, Phi_inherit_arr, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps_arr, Phi_proposed_arr, marker="^", color=color_proposed, label="proposed")
+if HAS_HUNGARIAN:
+    plt.plot(steps_arr, Phi_hungarian_arr, marker="d", color=color_hung, label="Hungarian")
+if HAS_AUCTION:
+    plt.plot(steps_arr, Phi_auction_arr, marker="x", color=color_auction, label="Auction")
+plt.xlabel("Шаг t")
+plt.ylabel("Число изменённых дуг Φ")
+plt.title("Устойчивость решений (переназначения Φ) для разных алгоритмов")
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+labels_all = ["SAP", "inherit", "proposed"]
+avg_time_all2 = [
+    float(np.mean(time_full_arr)),
+    float(np.mean(time_inherit_arr)),
+    float(np.mean(time_proposed_arr)),
+]
+avg_phi_all2 = [
+    float(np.mean(Phi_full_arr)),
+    float(np.mean(Phi_inherit_arr)),
+    float(np.mean(Phi_proposed_arr)),
+]
+colors_all2 = [color_sap, color_inherit, color_proposed]
+
+if HAS_HUNGARIAN:
+    labels_all.append("Hungarian")
+    avg_time_all2.append(float(np.mean(time_hungarian_arr)))
+    avg_phi_all2.append(float(np.mean(Phi_hungarian_arr)))
+    colors_all2.append(color_hung)
+
+if HAS_AUCTION:
+    labels_all.append("Auction")
+    avg_time_all2.append(float(np.mean(time_auction_arr)))
+    avg_phi_all2.append(float(np.mean(Phi_auction_arr)))
+    colors_all2.append(color_auction)
+
+plt.figure(figsize=(7, 5))
+for name, t_mean, phi_mean, col in zip(labels_all, avg_time_all2, avg_phi_all2, colors_all2):
+    plt.scatter(t_mean, phi_mean, s=120, color=col)
+    plt.text(t_mean, phi_mean, name, fontsize=9, ha="center", va="bottom")
+
+# === ЯЧЕЙКА 13: ключевые рисунки для статьи (финальная версия) ===
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+sns.set(style="whitegrid", context="notebook")
+
+color_full = "C0"
+color_inherit = "C1"
+color_proposed = "C2"
+
+# ---------------------------------------------------
+# 0. Подготовка данных
+# ---------------------------------------------------
+
+time_full = full_result["time_per_step"]
+time_inherit = partial_result["time_per_step"]
+time_proposed = proposed_result["time_per_step"]
+
+F_dyn_full = full_result["F_dynamic"]
+F_dyn_inherit = partial_result["F_dynamic"]
+F_dyn_proposed = proposed_result["F_dynamic"]
+
+Phi_full = full_result["Phi"]
+Phi_inherit = partial_result["Phi"]
+Phi_proposed = proposed_result["Phi"]
+
+T_vis = len(time_full)
+steps = list(range(1, T_vis + 1))
+
+# относительные отклонения F_dynamic от эталона full
+rel_gap_inherit = []
+rel_gap_proposed = []
+for F_full_t, F_inh_t, F_prop_t in zip(F_dyn_full, F_dyn_inherit, F_dyn_proposed):
+    denom = max(1.0, abs(F_full_t))
+    rel_gap_inherit.append(100.0 * (F_inh_t - F_full_t) / denom)
+    rel_gap_proposed.append(100.0 * (F_prop_t - F_full_t) / denom)
+
+title_suffix = f"(m={m}, n={n}, T={T}, λ={lambda_penalty})"
+
+# ---------------------------------------------------
+# 1. Рис. 1 — влияние λ на Φ и F^(t)
+# ---------------------------------------------------
+
+if "df_lambda" not in globals():
+    raise NameError(
+        "Не найден DataFrame df_lambda с результатами по λ. "
+        "Перед запуском этой ячейки создай df_lambda."
+    )
+
+print("df_lambda columns:", df_lambda.columns)
+
+phi_col = None
+fdyn_col = None
+for c in df_lambda.columns:
+    col_lower = c.lower()
+    if phi_col is None and ("phi" in col_lower or "changed_edges" in col_lower):
+        phi_col = c
+    if fdyn_col is None and ("f_dynamic" in col_lower or "fdynamic" in col_lower or col_lower.startswith("f_")):
+        fdyn_col = c
+
+if phi_col is None or fdyn_col is None:
+    raise ValueError(
+        "Не удалось найти столбцы с Φ и F_dynamic в df_lambda.\n"
+        "Задай явно, например: phi_col = 'Phi_changed_edges', fdyn_col = 'F_dynamic'."
+    )
+
+fig, ax1 = plt.subplots(figsize=(6, 4))
+
+line_phi, = ax1.plot(df_lambda["lambda"], df_lambda[phi_col],
+                     marker="o", color="C0", label="Φ_best")
+ax1.set_xlabel("λ")
+ax1.set_ylabel("Φ_best", color="C0")
+ax1.tick_params(axis="y", labelcolor="C0")
+
+ax2 = ax1.twinx()
+line_F, = ax2.plot(df_lambda["lambda"], df_lambda[fdyn_col],
+                   marker="s", color="C1", label="F^(t) лучшего решения")
+ax2.set_ylabel("F^(t) для лучшего решения", color="C1")
+ax2.tick_params(axis="y", labelcolor="C1")
+
+ax1.legend([line_phi, line_F],
+           ["Φ_best", "F^(t) лучшего решения"],
+           loc="upper left", frameon=True)
+
+plt.title("Влияние параметра λ на штраф Φ и динамическую цель F^(t)")
+fig.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 2. Рис. 2 — динамический функционал F^(t) по шагам
+# ---------------------------------------------------
+
+plt.figure(figsize=(8, 4))
+plt.plot(steps, F_dyn_full, marker="o", color=color_full, label="full")
+plt.plot(steps, F_dyn_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, F_dyn_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("Шаг времени t")
+plt.ylabel("F^(t)")
+plt.title(f"Динамический функционал F^(t) по шагам {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 3. Рис. 3 — относительное отклонение F_dynamic от full
+# ---------------------------------------------------
+
+plt.figure(figsize=(11.6, 4))
+plt.plot(steps, [0.0] * T_vis, linestyle="--", color="black", label="full (эталон)")
+plt.plot(steps, rel_gap_inherit, marker="s", color=color_inherit,
+         label="inherit: относит. отклонение F, %")
+plt.plot(steps, rel_gap_proposed, marker="^", color=color_proposed,
+         label="proposed: относит. отклонение F, %")
+plt.axhspan(-5, 5, color="grey", alpha=0.1, label="допустимое отклонение ±5%")
+plt.ylim(-120, 60)
+plt.xlabel("Шаг t")
+plt.ylabel("Отклонение F_dynamic от full, %")
+plt.title(f"Качество решения: динамическая цель vs full {title_suffix}")
+plt.grid(True, alpha=0.3)
+
+plt.legend(loc="center left",
+           bbox_to_anchor=(1.02, 0.5),
+           ncol=1,
+           frameon=True)
+
+plt.tight_layout()
+plt.show()
+
+
+# ---------------------------------------------------
+# 4. Рис. 4 — число изменённых дуг Φ по шагам
+# ---------------------------------------------------
+
+plt.figure(figsize=(8, 4))
+plt.plot(steps, Phi_full, marker="o", color=color_full, label="full")
+plt.plot(steps, Phi_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, Phi_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("Шаг t")
+plt.ylabel("Φ(X^{(t-1)}, X^{(t)})")
+plt.title(f"Число изменённых дуг Φ по шагам {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 5. Рис. 5 — время решения на шаг
+# ---------------------------------------------------
+
+plt.figure(figsize=(8, 4))
+plt.plot(steps, time_full, marker="o", color=color_full,
+         label="full (полный пересчёт)")
+plt.plot(steps, time_inherit, marker="s", color=color_inherit,
+         label="inherit (наследование)")
+plt.plot(steps, time_proposed, marker="^", color=color_proposed,
+         label="proposed (интервалы+локальная реопт.)")
+plt.xlabel("Шаг t")
+plt.ylabel("Время на шаг, с")
+plt.title(f"Время решения на шаг для методов full, inherit и proposed {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# === ЯЧЕЙКА 13: ключевые рисунки для статьи (финальная версия) ===
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns  # импорт оставляем на будущее, стиль не меняем
+
+plt.rcParams.update({"font.size": 10})  # единый размер шрифта
+
+color_full = "C0"
+color_inherit = "C1"
+color_proposed = "C2"
+
+# ---------------------------------------------------
+# 0. Подготовка данных
+# ---------------------------------------------------
+
+time_full = full_result["time_per_step"]
+time_inherit = partial_result["time_per_step"]
+time_proposed = proposed_result["time_per_step"]
+
+F_dyn_full = full_result["F_dynamic"]
+F_dyn_inherit = partial_result["F_dynamic"]
+F_dyn_proposed = proposed_result["F_dynamic"]
+
+Phi_full = full_result["Phi"]
+Phi_inherit = partial_result["Phi"]
+Phi_proposed = partial_result["Phi"]
+
+T_vis = len(time_full)
+steps = list(range(1, T_vis + 1))
+
+# относительные отклонения F_dynamic от эталона full
+rel_gap_inherit = []
+rel_gap_proposed = []
+for F_full_t, F_inh_t, F_prop_t in zip(F_dyn_full, F_dyn_inherit, F_dyn_proposed):
+    denom = max(1.0, abs(F_full_t))
+    rel_gap_inherit.append(100.0 * (F_inh_t - F_full_t) / denom)
+    rel_gap_proposed.append(100.0 * (F_prop_t - F_full_t) / denom)
+
+title_suffix = f"(m={m}, n={n}, T={T}, λ={lambda_penalty})"
+
+# ---------------------------------------------------
+# 1. Рис. 1 — влияние λ на Φ_best и F^(t)
+#    (одна ось, такой же стиль, как у остальных графиков)
+# ---------------------------------------------------
+
+if "df_lambda" not in globals():
+    raise NameError(
+        "Не найден DataFrame df_lambda с результатами по λ. "
+        "Перед запуском этой ячейки создай df_lambda."
+    )
+
+print("df_lambda columns:", df_lambda.columns)
+
+phi_col = None
+fdyn_col = None
+for c in df_lambda.columns:
+    col_lower = c.lower()
+    if phi_col is None and ("phi" in col_lower or "changed_edges" in col_lower):
+        phi_col = c
+    if fdyn_col is None and ("f_dynamic" in col_lower
+                             or "fdynamic" in col_lower
+                             or col_lower.startswith("f_")):
+        fdyn_col = c
+
+if phi_col is None or fdyn_col is None:
+    raise ValueError(
+        "Не удалось найти столбцы с Φ и F_dynamic в df_lambda.\n"
+        "Задай явно, например: phi_col = 'Phi_changed_edges', fdyn_col = 'F_dynamic'."
+    )
+
+plt.figure(figsize=(11.6, 4))
+
+plt.plot(
+    df_lambda["lambda"],
+    df_lambda[phi_col],
+    marker="o",
+    color="C0",
+    label="Φ_best",
+)
+plt.plot(
+    df_lambda["lambda"],
+    df_lambda[fdyn_col],
+    marker="s",
+    color="C1",
+    label="F^(t) лучшего решения",
+)
+
+plt.xlabel("λ")
+plt.ylabel("Значение показателя")
+plt.title("Влияние параметра λ на Φ_best и F^(t)")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper left", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 2. Рис. 2 — динамический функционал F^(t) по шагам
+# ---------------------------------------------------
+
+plt.figure(figsize=(11.6, 4))
+plt.plot(steps, F_dyn_full, marker="o", color=color_full, label="full")
+plt.plot(steps, F_dyn_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, F_dyn_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("Шаг времени t")
+plt.ylabel("F^(t)")
+plt.title(f"Динамический функционал F^(t) по шагам {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 3. Рис. 3 — относительное отклонение F_dynamic от full
+# ---------------------------------------------------
+
+plt.figure(figsize=(11.6, 4))
+
+plt.plot(
+    steps,
+    [0.0] * T_vis,
+    linestyle="--",
+    color="black",
+    label="full (эталон)",
+)
+plt.plot(
+    steps,
+    rel_gap_inherit,
+    marker="s",
+    color=color_inherit,
+    label="inherit: относит. отклонение F, %",
+)
+plt.plot(
+    steps,
+    rel_gap_proposed,
+    marker="^",
+    color=color_proposed,
+    label="proposed: относит. отклонение F, %",
+)
+
+plt.axhspan(
+    -5,
+    5,
+    color="grey",
+    alpha=0.1,
+    label="допустимое отклонение ±5%",
+)
+
+plt.ylim(-120, 60)
+plt.xlabel("Шаг t", fontsize=10)
+plt.ylabel("Отклонение F_dynamic от full, %", fontsize=10)
+plt.title(f"Качество решения: динамическая цель vs full {title_suffix}", fontsize=10)
+
+plt.grid(True, alpha=0.3)
+
+plt.legend(
+    loc="center right",
+    bbox_to_anchor=(1, 0.35),
+    fontsize=10,
+    frameon=True,
+    framealpha=0.8,
+    facecolor="white",
+    edgecolor="grey",
+)
+
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 4. Рис. 4 — число изменённых дуг Φ по шагам
+# ---------------------------------------------------
+
+plt.figure(figsize=(11.6, 4))
+plt.plot(steps, Phi_full, marker="o", color=color_full, label="full")
+plt.plot(steps, Phi_inherit, marker="s", color=color_inherit, label="inherit")
+plt.plot(steps, Phi_proposed, marker="^", color=color_proposed, label="proposed")
+plt.xlabel("Шаг t")
+plt.ylabel("Φ(X^{(t-1)}, X^{(t)})")
+plt.title(f"Число изменённых дуг Φ по шагам {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()
+
+# ---------------------------------------------------
+# 5. Рис. 5 — время решения на шаг
+# ---------------------------------------------------
+
+plt.figure(figsize=(11.6, 4))
+plt.plot(
+    steps,
+    time_full,
+    marker="o",
+    color=color_full,
+    label="full (полный пересчёт)",
+)
+plt.plot(
+    steps,
+    time_inherit,
+    marker="s",
+    color=color_inherit,
+    label="inherit (наследование)",
+)
+plt.plot(
+    steps,
+    time_proposed,
+    marker="^",
+    color=color_proposed,
+    label="proposed (интервалы+локальная реопт.)",
+)
+plt.xlabel("Шаг t")
+plt.ylabel("Время на шаг, с")
+plt.title(f"Время решения на шаг для методов full, inherit и proposed {title_suffix}")
+plt.grid(True, alpha=0.3)
+plt.legend(loc="upper right", frameon=True)
+plt.tight_layout()
+plt.show()

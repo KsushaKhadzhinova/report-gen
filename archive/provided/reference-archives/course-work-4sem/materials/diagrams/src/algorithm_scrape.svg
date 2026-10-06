@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="462.00pt" height="635.09pt" viewBox="0 0 462.00 635.09">
+<rect width="462.00" height="635.09" fill="white"/>
+<rect x="172.00" y="12.00" width="118.00" height="31.82" rx="15.91" ry="15.91" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="31.06" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Начало</tspan></text>
+<polygon points="231.00,52.82 290.00,84.64 231.00,116.45 172.00,84.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="82.29" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Пауза после</tspan><tspan x="231.00" dy="11.00">отказа?</tspan></text>
+<rect x="172.00" y="125.45" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="154.92" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Выбрать активные</tspan><tspan x="231.00" dy="11.00">отслеживаемые товары</tspan></text>
+<rect x="316.00" y="125.45" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="375.00" y="154.92" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="375.00" dy="0.00">Уменьшить счётчик</tspan><tspan x="375.00" dy="11.00">пропускаемых циклов</tspan></text>
+<polygon points="231.00,198.09 290.00,229.91 231.00,261.73 172.00,229.91" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="227.56" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Остались</tspan><tspan x="231.00" dy="11.00">товары?</tspan></text>
+<rect x="172.00" y="270.73" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="300.20" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Сформировать запрос</tspan><tspan x="231.00" dy="11.00">к площадке</tspan></text>
+<rect x="28.00" y="270.73" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="87.00" y="300.20" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="87.00" dy="0.00">Зафиксировать</tspan><tspan x="87.00" dy="11.00">транзакцию</tspan></text>
+<polygon points="191.09,343.36 290.00,343.36 270.91,407.00 172.00,407.00" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="372.83" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Получить</tspan><tspan x="231.00" dy="11.00">объявления</tspan></text>
+<polygon points="231.00,416.00 290.00,447.82 231.00,479.64 172.00,447.82" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="445.47" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Отказ</tspan><tspan x="231.00" dy="11.00">площадки?</tspan></text>
+<rect x="172.00" y="488.64" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="512.60" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Обработать</tspan><tspan x="231.00" dy="11.00">полученные</tspan><tspan x="231.00" dy="11.00">объявления</tspan></text>
+<rect x="316.00" y="488.64" width="118.00" height="63.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="375.00" y="512.60" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="375.00" dy="0.00">Увеличить паузу,</tspan><tspan x="375.00" dy="11.00">оповестить</tspan><tspan x="375.00" dy="11.00">администратора</tspan></text>
+<rect x="172.00" y="591.27" width="118.00" height="31.82" rx="15.91" ry="15.91" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="231.00" y="610.33" text-anchor="middle" font-family="Arial" font-size="9" fill="black"><tspan x="231.00" dy="0.00">Конец</tspan></text>
+<polyline points="231.00,43.82 231.00,52.82" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,116.45 231.00,125.45" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="239.00" y="123.95" text-anchor="start" font-family="Arial" font-size="9" fill="black">Нет</text>
+<polyline points="231.00,189.09 231.00,198.09" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,261.73 231.00,270.73" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="239.00" y="269.23" text-anchor="start" font-family="Arial" font-size="9" fill="black">Да</text>
+<polyline points="231.00,334.36 231.00,343.36" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,407.00 231.00,416.00" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,479.64 231.00,488.64" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="239.00" y="487.14" text-anchor="start" font-family="Arial" font-size="9" fill="black">Нет</text>
+<text x="332.50" y="80.64" text-anchor="middle" font-family="Arial" font-size="9" fill="black">Да</text>
+<polyline points="290.00,84.64 375.00,84.64 375.00,125.45" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="129.50" y="225.91" text-anchor="middle" font-family="Arial" font-size="9" fill="black">Нет</text>
+<polyline points="172.00,229.91 87.00,229.91 87.00,270.73" fill="none" stroke="black" stroke-width="1.5"/>
+<text x="332.50" y="443.82" text-anchor="middle" font-family="Arial" font-size="9" fill="black">Да</text>
+<polyline points="290.00,447.82 375.00,447.82 375.00,488.64" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,552.27 231.00,563.19 13.00,563.19 13.00,193.59 231.00,193.59" fill="none" stroke="black" stroke-width="1.5"/>
+<line x1="231.00" y1="193.59" x2="224.07" y2="189.59" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+<line x1="231.00" y1="193.59" x2="224.07" y2="197.59" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+<polyline points="375.00,189.09 375.00,191.79 449.00,191.79 449.00,579.57 231.00,579.57" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="375.00,552.27 375.00,579.57" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="87.00,334.36 87.00,579.57 231.00,579.57" fill="none" stroke="black" stroke-width="1.5"/>
+<polyline points="231.00,579.57 231.00,591.27" fill="none" stroke="black" stroke-width="1.5"/>
+</svg>

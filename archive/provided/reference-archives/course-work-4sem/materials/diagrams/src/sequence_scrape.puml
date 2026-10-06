@@ -1,0 +1,39 @@
+@startuml
+skinparam defaultFontName DejaVu Sans
+skinparam defaultFontSize 17
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam sequenceMessageAlign left
+skinparam sequence {
+  ParticipantBackgroundColor #DCE9F7
+  ParticipantBorderColor #2C5F8D
+  LifeLineBorderColor #888888
+  ArrowColor #333333
+}
+autonumber
+
+participant "Задача опроса" as J
+participant "Kufar.by" as K
+participant "Модуль отбора" as M
+database "PostgreSQL" as DB
+
+J -> DB : выбрать активные товары
+DB --> J : список товаров
+
+loop для каждого товара
+  J -> K : поиск по категории, фильтрам и цене
+  K --> J : объявления
+  J -> M : отобрать объявления
+
+  loop для каждого объявления
+    M -> DB : найти объявление
+    DB --> M : запись и прежняя цена
+    M -> DB : добавить или обновить объявление
+    opt новое объявление или снижение цены
+      M -> DB : создать совпадение
+    end
+  end
+end
+
+J -> DB : зафиксировать транзакцию
+@enduml

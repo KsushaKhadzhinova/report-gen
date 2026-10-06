@@ -1,0 +1,89 @@
+@startuml
+' Диаграмма вариантов использования.
+' Каждый вариант назван глаголом; операции над отслеживаемым товаром
+' образуют полный набор CRUDL (создание, чтение, изменение, удаление, список).
+skinparam defaultFontName Arial
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam actorStyle awesome
+skinparam usecase {
+  BackgroundColor #DCE9F7
+  BorderColor #2C5F8D
+  ArrowColor #333333
+  FontName Arial
+}
+skinparam packageStyle rectangle
+skinparam nodesep 16
+skinparam ranksep 50
+skinparam ActorStereotypeFontStyle plain
+left to right direction
+
+actor "Пользователь" as U
+actor "Администратор" as A
+actor "Kufar API" as K <<внешняя система>>
+actor "Почтовый сервер" as M <<внешняя система>>
+
+usecase "Добавить\nтовар" as C1
+usecase "Просмотреть\nсписок товаров" as C2
+usecase "Просмотреть\nкарточку товара" as C3
+usecase "Изменить\nтовар" as C4
+usecase "Удалить\nтовар" as C5
+
+usecase "Задать фильтры\nкатегории" as UC6
+usecase "Импортировать\nфильтры из ссылки" as UC7
+usecase "Проверить\nлимит" as UC8
+
+usecase "Получить\nуведомление" as UC9
+usecase "Оценить предложение" as UC10
+usecase "Включить уведомления" as UC11
+usecase "Отключить уведомления" as UC12
+
+usecase "Выгрузить\nтовары в файл" as UC13
+usecase "Загрузить\nтовары из файла" as UC14
+usecase "Сформировать отчёт" as UC15
+
+usecase "Сменить язык" as UC16
+usecase "Привязать\nпочту" as UC17
+usecase "Подтвердить\nпочту" as UC18
+
+usecase "Опросить площадку" as UC19
+usecase "Обновить\nсправочник" as UC20
+
+usecase "Получить отчёт\nо системе" as UC21
+usecase "Получить\nоповещение о сбое" as UC22
+
+U --> C1
+U --> C2
+U --> C3
+U --> C4
+U --> C5
+U --> UC9
+U --> UC10
+U --> UC11
+U --> UC12
+U --> UC13
+U --> UC14
+U --> UC15
+U --> UC16
+U --> UC17
+
+A --> UC21
+A --> UC22
+
+C1 ..> UC6 : <<include>>
+C1 ..> UC8 : <<include>>
+C4 ..> UC6 : <<include>>
+UC7 ..> C1 : <<extend>>
+UC14 ..> UC8 : <<include>>
+UC17 ..> UC18 : <<include>>
+
+UC19 ..> UC9 : <<include>>
+UC19 --> K
+UC20 --> K
+UC18 --> M
+UC9 --> M
+UC15 --> M
+
+U <|-- A
+@enduml

@@ -1,0 +1,43 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam componentBackgroundColor White
+skinparam componentBorderColor Black
+skinparam ArrowColor Black
+skinparam databaseBackgroundColor LightYellow
+skinparam databaseBorderColor Black
+
+package "Telegram Bot System" {
+  [main.py] as main
+  [handlers.py] as handlers
+  [admin_handlers.py] as admin
+  [scheduler.py] as scheduler
+  [from_api.py] as api
+  [cache_utils.py] as cache
+}
+
+package "Database Layer" {
+  [database/models.py] as models
+  [database/requests.py] as requests
+  [database/populate.py] as populate
+}
+
+database "SQLite / PostgreSQL" as db
+[Telegram API] as tg_api
+[API БГУИР] as bsuir_api
+
+main --> handlers
+main --> admin
+main --> scheduler
+handlers --> requests
+admin --> requests
+scheduler --> requests
+scheduler --> tg_api
+api --> bsuir_api
+api --> cache
+handlers --> api
+requests --> models
+requests --> db
+populate --> db
+populate --> bsuir_api
+@enduml

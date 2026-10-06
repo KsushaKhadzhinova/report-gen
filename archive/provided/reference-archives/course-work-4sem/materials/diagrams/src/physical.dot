@@ -1,0 +1,161 @@
+digraph PHYSICAL {
+  rankdir=LR; bgcolor="white"; splines=spline; overlap=false;
+  graph [nodesep=0.9, ranksep=1.8];
+  node [shape=plaintext, fontname="DejaVu Sans", fontsize=11];
+  edge [fontname="DejaVu Sans", fontsize=10, color="#2C5F8D", penwidth=1.3];
+  kufar_attributes [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#3C7D40"><FONT COLOR="white"><B>kufar_attributes</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="category_id" ALIGN="LEFT">category_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="p" ALIGN="LEFT">p</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="pu" ALIGN="LEFT">pu</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="label" ALIGN="LEFT">label</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="seen_count" ALIGN="LEFT">seen_count</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="updated_at" ALIGN="LEFT">updated_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD COLSPAN="3" ALIGN="LEFT" BGCOLOR="#F2F2F2"><FONT POINT-SIZE="9">UQ (category_id, p)</FONT></TD></TR>
+   </TABLE>>];
+
+  listings [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>listings</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="platform" ALIGN="LEFT">platform</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="external_id" ALIGN="LEFT">external_id</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="title" ALIGN="LEFT">title</TD><TD ALIGN="LEFT">text</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="description" ALIGN="LEFT">description</TD><TD ALIGN="LEFT">text</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="price_byn" ALIGN="LEFT">price_byn</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="currency" ALIGN="LEFT">currency</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="url" ALIGN="LEFT">url</TD><TD ALIGN="LEFT">text</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="images" ALIGN="LEFT">images</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="location" ALIGN="LEFT">location</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="seller_info" ALIGN="LEFT">seller_info</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="condition" ALIGN="LEFT">condition</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="raw_data" ALIGN="LEFT">raw_data</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="posted_at" ALIGN="LEFT">posted_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="first_seen_at" ALIGN="LEFT">first_seen_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="last_seen_at" ALIGN="LEFT">last_seen_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD COLSPAN="3" ALIGN="LEFT" BGCOLOR="#F2F2F2"><FONT POINT-SIZE="9">IDX (platform, external_id)</FONT></TD></TR>
+   </TABLE>>];
+
+  price_references [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#6B4E9B"><FONT COLOR="white"><B>price_references</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="product_query" ALIGN="LEFT">product_query</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="platform" ALIGN="LEFT">platform</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="min_price" ALIGN="LEFT">min_price</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="avg_price" ALIGN="LEFT">avg_price</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="max_price" ALIGN="LEFT">max_price</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="sample_count" ALIGN="LEFT">sample_count</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="fetched_at" ALIGN="LEFT">fetched_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  users [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>users</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="telegram_id" ALIGN="LEFT">telegram_id</TD><TD ALIGN="LEFT">bigint</TD><TD ALIGN="LEFT">UQ NN</TD></TR>
+    <TR><TD PORT="username" ALIGN="LEFT">username</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="first_name" ALIGN="LEFT">first_name</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="language" ALIGN="LEFT">language</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="is_active" ALIGN="LEFT">is_active</TD><TD ALIGN="LEFT">boolean</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="notification_enabled" ALIGN="LEFT">notification_enabled</TD><TD ALIGN="LEFT">boolean</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="email" ALIGN="LEFT">email</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_verified" ALIGN="LEFT">email_verified</TD><TD ALIGN="LEFT">boolean</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="email_notifications" ALIGN="LEFT">email_notifications</TD><TD ALIGN="LEFT">boolean</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="email_code_hash" ALIGN="LEFT">email_code_hash</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_code_expires_at" ALIGN="LEFT">email_code_expires_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_code_sent_at" ALIGN="LEFT">email_code_sent_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_code_attempts" ALIGN="LEFT">email_code_attempts</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="updated_at" ALIGN="LEFT">updated_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  kufar_attribute_values [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#3C7D40"><FONT COLOR="white"><B>kufar_attribute_values</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="attribute_id" ALIGN="LEFT">attribute_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="value_code" ALIGN="LEFT">value_code</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="value_label" ALIGN="LEFT">value_label</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="parent_code" ALIGN="LEFT">parent_code</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="seen_count" ALIGN="LEFT">seen_count</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="updated_at" ALIGN="LEFT">updated_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD COLSPAN="3" ALIGN="LEFT" BGCOLOR="#F2F2F2"><FONT POINT-SIZE="9">UQ (attribute_id, value_code)</FONT></TD></TR>
+   </TABLE>>];
+
+  tracked_products [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>tracked_products</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="user_id" ALIGN="LEFT">user_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="name" ALIGN="LEFT">name</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="category" ALIGN="LEFT">category</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="min_price_byn" ALIGN="LEFT">min_price_byn</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="max_price_byn" ALIGN="LEFT">max_price_byn</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="condition_preference" ALIGN="LEFT">condition_preference</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="flexibility" ALIGN="LEFT">flexibility</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="search_keywords" ALIGN="LEFT">search_keywords</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="exclude_keywords" ALIGN="LEFT">exclude_keywords</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="kufar_filters" ALIGN="LEFT">kufar_filters</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="min_deal_score" ALIGN="LEFT">min_deal_score</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="is_active" ALIGN="LEFT">is_active</TD><TD ALIGN="LEFT">boolean</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  custom_attributes [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#6B4E9B"><FONT COLOR="white"><B>custom_attributes</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="tracked_product_id" ALIGN="LEFT">tracked_product_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="attribute_name" ALIGN="LEFT">attribute_name</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="attribute_type" ALIGN="LEFT">attribute_type</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="value" ALIGN="LEFT">value</TD><TD ALIGN="LEFT">text</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="priority" ALIGN="LEFT">priority</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  matches [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#B5820A"><FONT COLOR="white"><B>matches</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="tracked_product_id" ALIGN="LEFT">tracked_product_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="listing_id" ALIGN="LEFT">listing_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="deal_score" ALIGN="LEFT">deal_score</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="match_details" ALIGN="LEFT">match_details</TD><TD ALIGN="LEFT">json</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="notified_at" ALIGN="LEFT">notified_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="notify_attempts" ALIGN="LEFT">notify_attempts</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="notify_error" ALIGN="LEFT">notify_error</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_notified_at" ALIGN="LEFT">email_notified_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="email_attempts" ALIGN="LEFT">email_attempts</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="user_reaction" ALIGN="LEFT">user_reaction</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="created_at" ALIGN="LEFT">created_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  sent_notifications [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD COLSPAN="3" BGCOLOR="#B5820A"><FONT COLOR="white"><B>sent_notifications</B></FONT></TD></TR>
+    <TR><TD PORT="id" ALIGN="LEFT">id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">PK</TD></TR>
+    <TR><TD PORT="user_id" ALIGN="LEFT">user_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="tracked_product_id" ALIGN="LEFT">tracked_product_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="listing_id" ALIGN="LEFT">listing_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK NN</TD></TR>
+    <TR><TD PORT="match_id" ALIGN="LEFT">match_id</TD><TD ALIGN="LEFT">integer</TD><TD ALIGN="LEFT">FK</TD></TR>
+    <TR><TD PORT="listing_external_id" ALIGN="LEFT">listing_external_id</TD><TD ALIGN="LEFT">varchar</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="platform" ALIGN="LEFT">platform</TD><TD ALIGN="LEFT">enum</TD><TD ALIGN="LEFT">NN</TD></TR>
+    <TR><TD PORT="price_byn" ALIGN="LEFT">price_byn</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="market_avg_byn" ALIGN="LEFT">market_avg_byn</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="discount_pct" ALIGN="LEFT">discount_pct</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="deal_score" ALIGN="LEFT">deal_score</TD><TD ALIGN="LEFT">float</TD><TD ALIGN="LEFT"></TD></TR>
+    <TR><TD PORT="sent_at" ALIGN="LEFT">sent_at</TD><TD ALIGN="LEFT">timestamp</TD><TD ALIGN="LEFT">NN</TD></TR>
+   </TABLE>>];
+
+  kufar_attribute_values:attribute_id -> kufar_attributes:id [label="M:1"];
+  tracked_products:user_id -> users:id [label="M:1"];
+  custom_attributes:tracked_product_id -> tracked_products:id [label="M:1"];
+  matches:tracked_product_id -> tracked_products:id [label="M:1"];
+  matches:listing_id -> listings:id [label="M:1"];
+  sent_notifications:user_id -> users:id [label="M:1"];
+  sent_notifications:tracked_product_id -> tracked_products:id [label="M:1"];
+  sent_notifications:listing_id -> listings:id [label="M:1"];
+  sent_notifications:match_id -> matches:id [label="M:1"];
+}

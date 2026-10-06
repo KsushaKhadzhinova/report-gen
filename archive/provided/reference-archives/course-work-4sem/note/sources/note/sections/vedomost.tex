@@ -1,0 +1,8 @@
+\renewcommand{\bibsection}{\sectioncentered*{Ведомость курсового проекта}}
+\phantomsection\pagebreak % исправляет нумерацию в документе и исправляет гиперссылки в pdf
+
+\IfFileExists{vedomost.pdf}{
+\includepdf[pages = 1]{vedomost.pdf}
+}{
+  \centering \textit{Файл vedomost.pdf не найден. Пожалуйста, добавьте его для включения ведомости в документ.}
+}

@@ -1,0 +1,20 @@
+digraph listing {
+  rankdir=TB; bgcolor="white"; splines=polyline; nodesep=0.5; ranksep=0.5;
+  node [fontname="DejaVu Sans", fontsize=12, color="#333333", penwidth=1.2, style=filled, fillcolor=white];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#333333", penwidth=1.2, arrowhead=none];
+
+  start [shape=box, style="rounded,filled", label="Начало"];
+  find  [shape=box, label="Найти объявление в базе данных\nпо площадке и внешнему идентификатору"];
+  save  [shape=box, label="Добавить или обновить объявление,\nсохранить прежнюю цену"];
+  d1    [shape=diamond, height=1.4, width=3.6, label="Цена ниже порога,\nнет слов-исключений,\nсовпадает название?"];
+  d2    [shape=diamond, height=1.4, width=3.6, label="Опубликовано после\nдобавления товара\nили цена снизилась?"];
+  match [shape=box, label="Создать совпадение\nсо статусом «не доставлено»"];
+  stop  [shape=box, style="rounded,filled", label="Конец"];
+
+  start -> find -> save -> d1;
+  d1 -> d2 [label="да"];
+  d2 -> match [label="да"];
+  match -> stop;
+  d1 -> stop [label="нет", constraint=false];
+  d2 -> stop [label="нет", constraint=false];
+}

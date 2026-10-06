@@ -1,0 +1,23 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam objectBackgroundColor White
+skinparam objectBorderColor Black
+skinparam ArrowColor Black
+skinparam Padding 5
+
+object "Студент" as student
+object "ТелеграмБот" as bot
+object "ОбработчикПользователя" as handler
+object "СервисБД" as service
+object "UserDiscipline" as ud
+
+student --> bot : 1: want_<id>_1 (callback)
+bot --> handler : 2: save_preference(callback)
+handler --> service : 3: update_user_want(tg_id, discipline_id, want=1)
+service --> ud : 4: SQL INSERT/UPDATE
+ud --> service : 5: OK
+service --> handler : 6: результат записи в очередь
+handler --> bot : 7: результат + кнопки
+bot --> student : 8: "Ваш выбор сохранён"
+@enduml

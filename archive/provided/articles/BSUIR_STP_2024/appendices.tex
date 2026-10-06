@@ -1,0 +1,61 @@
+% Настройка заголовков приложений (выравнивание по правому краю)
+\newcommand{\apptitle}[3]{
+    \newpage
+    \begin{flushright}
+        {\bfseries ПРИЛОЖЕНИЕ #1} \\
+        (#2)
+    \end{flushright}
+    \begin{center}
+        {\bfseries #3}
+    \end{center}
+    \addcontentsline{toc}{section}{Приложение #1. #3}
+    \vspace{0.5cm}
+}
+
+% ПРИЛОЖЕНИЕ А: Отчет о проверке на заимствования (Обязательное по п. 1.2.11)
+\apptitle{А}{обязательное}{ОТЧЕТ О ПРОВЕРКЕ НА ЗАИМСТВОВАНИЯ}
+\noindent В данном приложении представлен скриншот или краткая форма отчета из системы «Антиплагиат», подтверждающая оригинальность текста пояснительной записки.
+% Здесь можно вставить изображение отчета:
+% \begin{center}
+%     \includegraphics[width=0.8\textwidth]{antiplagiat_report.png}
+% \end{center}
+
+% ПРИЛОЖЕНИЕ Б: Листинг программного кода (Рекомендуемое)
+\apptitle{Б}{рекомендуемое}{ЛИСТИНГ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ МИКРОКОНТРОЛЛЕРА}
+\begin{verbatim}
+#include <WiFi.h>
+#include <PubSubClient.h>
+#include "SHT31.h"
+
+void setup() {
+    Serial.begin(115200);
+    setup_wifi();
+    client.setServer(mqtt_server, 1883);
+}
+
+void loop() {
+    float t = sht31.readTemperature();
+    float h = sht31.readHumidity();
+    publishData(t, h);
+    ESP.deepSleep(600e6); // Сон на 10 минут
+}
+\end{verbatim}
+
+% ПРИЛОЖЕНИЕ В: Спецификация или Перечень элементов (Справочное)
+\apptitle{В}{справочное}{ПЕРЕЧЕНЬ ЭЛЕМЕНТОВ К ПРИНЦИПИАЛЬНОЙ СХЕМЕ}
+\begin{center}
+\begin{tabular}{|p{2cm}|p{6cm}|p{2cm}|p{3cm}|}
+\hline
+Поз. обозн. & Наименование & Кол. & Примечание \\ \hline
+DD1 & Микроконтроллер ESP32-WROOM-32 & 1 & Espressif \\ \hline
+U1 & Датчик температуры/влажности SHT31 & 1 & Sensirion \\ \hline
+C1, C2 & Конденсатор К10-17 0,1 мкФ & 2 & \\ \hline
+R1, R2 & Резистор С2-23 4,7 кОм & 2 & \\ \hline
+\end{tabular}
+\end{center}
+
+% ПРИЛОЖЕНИЕ Г: Акты внедрения (при наличии)
+\apptitle{Г}{справочное}{АКТ О ВНЕДРЕНИИ РЕЗУЛЬТАТОВ ДИПЛОМНОГО ПРОЕКТА}
+\noindent В данное приложение подшиваются копии документов, подтверждающих практическое использование результатов работы на предприятии или в учебном процессе.
+
+\newpage

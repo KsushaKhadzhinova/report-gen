@@ -1,0 +1,69 @@
+graph ER {
+  bgcolor="white";
+  margin="0.04,0.04";
+  splines=true;
+  overlap=true;
+  node [fontname="Arial", fontsize=13];
+  edge [fontname="Arial", fontsize=13, color="#333333"];
+
+  // Сущности
+  node [shape=box, style="filled", fillcolor="#DCE9F7", color="#2C5F8D",
+        penwidth=1.4, margin="0.09,0.05"];
+  attr [label="Атрибут\nфильтра", pos="0.0,715.7!"];
+  val [label="Значение\nатрибута", pos="0.0,579.6!"];
+  prod [label="Отслеживаемый\nтовар", pos="0.0,417.6!"];
+  match [label="Совпадение", pos="0.0,229.7!"];
+  sent [label="Уведомление", pos="0.0,41.8!"];
+  users [label="Пользователь", pos="-234.0,496.8!"];
+  list [label="Объявление", pos="-234.0,229.7!"];
+
+  // Связи
+  node [shape=diamond, style="filled", fillcolor="#FCE8C8", color="#B5820A",
+        penwidth=1.4, height=0.60, width=1.70];
+  R6 [label="имеет", pos="0.0,648.0!"];
+  R7 [label="уточняет", pos="0.0,498.2!"];
+  R2 [label="порождает", pos="0.0,324.0!"];
+  R4 [label="подтверждается", pos="0.0,136.1!"];
+  R1 [label="отслеживает", pos="-123.8,457.2!"];
+  R3 [label="входит в", pos="-123.8,229.7!"];
+
+  // Ключевые атрибуты; полный состав приведён в тексте
+  node [shape=ellipse, style="filled", fillcolor="#E8F5E9", color="#3C7D40",
+        penwidth=1.1, height=0.34, margin="0.04,0.02"];
+  a1 [label=<<u>идентификатор</u>>, pos="151.2,741.6!"];
+  a2 [label="код\nзапроса", pos="151.2,689.8!"];
+  v1 [label=<<u>идентификатор</u>>, pos="151.2,605.5!"];
+  v2 [label="код\nзначения", pos="151.2,553.7!"];
+  p1 [label=<<u>идентификатор</u>>, pos="151.2,469.4!"];
+  p2 [label="категория", pos="151.2,417.6!"];
+  p3 [label="пороговая\nцена", pos="151.2,365.8!"];
+  m1 [label=<<u>идентификатор</u>>, pos="151.2,281.5!"];
+  m2 [label="показатель\nвыгоды", pos="151.2,229.7!"];
+  m3 [label="время\nдоставки", pos="151.2,177.8!"];
+  s1 [label=<<u>идентификатор</u>>, pos="151.2,93.6!"];
+  s2 [label="цена при\nотправке", pos="151.2,41.8!"];
+  s3 [label="дата\nотправки", pos="151.2,-10.1!"];
+  u1 [label=<<u>идентификатор</u>>, pos="-259.2,424.8!"];
+  u2 [label="идентификатор\nTelegram", pos="-234.0,568.8!"];
+  u3 [label="электронная\nпочта", pos="-349.2,496.8!"];
+  l1 [label=<<u>идентификатор</u>>, pos="-259.2,158.4!"];
+  l2 [label="внешний\nидентификатор", pos="-234.0,302.4!"];
+  l3 [label="цена", pos="-345.6,229.7!"];
+
+  // Атрибуты -- сущности
+  attr -- a1; attr -- a2;
+  val -- v1; val -- v2;
+  prod -- p1; prod -- p2; prod -- p3;
+  match -- m1; match -- m2; match -- m3;
+  sent -- s1; sent -- s2; sent -- s3;
+  users -- u1; users -- u2; users -- u3;
+  list -- l1; list -- l2; list -- l3;
+
+  // Связи и мощность
+  attr -- R6 [label="1"];  R6 -- val [label="N"];
+  val -- R7 [label="M"];  R7 -- prod [label="N"];
+  prod -- R2 [label="1"];  R2 -- match [label="N"];
+  match -- R4 [label="1"];  R4 -- sent [label="N"];
+  users -- R1 [label="1"];  R1 -- prod [label="N"];
+  list -- R3 [label="1"];  R3 -- match [label="N"];
+}

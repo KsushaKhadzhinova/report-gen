@@ -1,0 +1,294 @@
+Ячейка 13 — основное место для доработки
+Здесь стоит внести реальные изменения.
+Добавить параметры задачи в заголовки:
+Везде, где сейчас:
+python
+plt.title("Время на шаг для трёх методов")
+
+заменить, например, на:
+python
+title_suffix = f"(m={m}, n={n}, T={T}, λ={lambda_penalty})"
+plt.title(f"Время на шаг для трёх методов {title_suffix}")
+
+То же для графиков Φ и relgap.
+Единая цветовая схема и легенды:
+В начале ячейки 13 добавить:
+python
+color_full = "C0"
+color_partial = "C1"
+color_proposed = "C2"
+
+и использовать эти цвета во всех plot / histplot / barplot:
+python
+plt.plot(steps, time_full, marker="o", color=color_full, label="full")
+
+Лог‑масштаб или нормировка времени (по желанию):
+В графике временных рядов:
+python
+plt.yscale("log")
+
+либо строить нормированное время:
+python
+norm_time_full = np.array(time_full) / dfsummary.loc[dfsummary["method"]=="full","avgtime"].iloc
+# и далее plot(norm_time_full, ...)
+
+Зоны допустимого relgap:
+В графике отклонения F_dynamic (там, где rel_gap_partial/proposed):
+python
+plt.axhspan(-5, 5, color="grey", alpha=0.1, label="допустимое отклонение ±5%")
+
+и ограничить ось:
+python
+plt.ylim(-120, 60)
+
+Переразметка barplot’ов dfsummary:
+В блоке 13.3 заменить вызовы на более «корректный» стиль seaborn и устранить FutureWarning:
+python
+sns.barplot(data=dfsummary, x="method", y="avgtime", hue="method",
+            palette="Blues", dodge=False, legend=False)
+
+то же для avgrelativegapF и avgchangededges.
+Заодно можно добавить сетку:
+python
+plt.grid(axis="y", alpha=0.3)
+
+Scatter «скорость–устойчивость» с линиями:
+В блоке scatter после plt.scatter(...) добавить:
+python
+# вертикальная/горизонтальная линии через full
+base_time = dfsummary.loc[dfsummary["method"]=="full","avgtime"].iloc
+base_phi = dfsummary.loc[dfsummary["method"]=="full","avgchangededges"].iloc
+plt.axvline(base_time, color="grey", linestyle="--", linewidth=1)
+plt.axhline(base_phi, color="grey", linestyle="--", linewidth=1)
+
+Это явно выделит «базовый» метод.
+Аннотации на ключевых точках relgap:
+В графике relgap можно пометить 1–2 шага с экстремумами:
+python
+worst_t = int(np.argmax(rel_gap_partial))
+plt.annotate("max loss (partial)",
+             xy=(steps[worst_t], rel_gap_partial[worst_t]),
+             xytext=(steps[worst_t]+1, rel_gap_partial[worst_t]+10),
+             arrowprops=dict(arrowstyle="->", color="C1"))
+
+Аналогично для одного шага proposed, где он ближе всего к 0%.
+Формат вывода для статьи:
+В конце ячейки 13, перед print("Ячейка 13..."), добавить сохранение ключевых фигур:
+python
+plt.savefig("fig_time_series.pdf", bbox_inches="tight")
+
+для нужных графиков (возможно, только для 2–3 основных).
+Если хочешь, можно следующим шагом прислать текущий код ячейки 13, и его можно переписать сразу с этими изменениями «под ключ», чтобы ты просто заменил ячейку целиком. # ЯЧЕЙКА 13: Финальный отчёт по трём методам
+# ------------------------------------------
+# Использует только результаты из ячеек 11 и 12:
+#   full_result, partial_result, proposed_result, dfsummary
+# Опционально: массив Ecrit_fraction (доля критичных дуг по шагам) из run_series_proposed
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+sns.set(style="whitegrid", context="notebook")
+
+
+# ---------------------------------------------------------
+# 13.0. Извлекаем серии из глобалов
+# ---------------------------------------------------------
+
+
+time_full = full_result["time_per_step"]
+time_partial = partial_result["time_per_step"]
+time_proposed = proposed_result["time_per_step"]
+
+
+Fdyn_full = full_result["F_dynamic"]
+Fdyn_partial = partial_result["F_dynamic"]
+Fdyn_proposed = proposed_result["F_dynamic"]
+
+
+Phi_full = full_result["Phi"]
+Phi_partial = partial_result["Phi"]
+Phi_proposed = proposed_result["Phi"]
+
+
+# dfsummary был сформирован в ячейке 11
+dfsummary = globals().get("dfsummary", None)
+
+
+T_vis = len(time_full)
+steps = list(range(1, T_vis + 1))
+
+
+# относительные отклонения относительно full
+rel_gap_partial = []
+rel_gap_proposed = []
+for Ff, Fp, Fpr in zip(Fdyn_full, Fdyn_partial, Fdyn_proposed):
+    denom = max(1.0, abs(Ff))
+    rel_gap_partial.append(100.0 * (Fp - Ff) / denom)
+    rel_gap_proposed.append(100.0 * (Fpr - Ff) / denom)
+
+
+# ---------------------------------------------------------
+# 13.1. Временные ряды: Phi_t и F_t / разности
+# ---------------------------------------------------------
+
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, Phi_full, marker="o", label="full")
+plt.plot(steps, Phi_partial, marker="s", label="partial")
+plt.plot(steps, Phi_proposed, marker="^", label="proposed")
+plt.xlabel("t")
+plt.ylabel("Φ(X^{(t-1)}, X^{(t)})")
+plt.title("Динамика устойчивости (число изменённых дуг Φ_t)")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+plt.figure(figsize=(10, 4))
+plt.plot(steps, [0.0] * T_vis, linestyle="--", color="black", label="full (эталон)")
+plt.plot(steps, rel_gap_partial, marker="s", label="partial: отклонение F_dynamic, %")
+plt.plot(steps, rel_gap_proposed, marker="^", label="proposed: отклонение F_dynamic, %")
+plt.xlabel("t")
+plt.ylabel("Отклонение F_dynamic от full, %")
+plt.title("Качество решения: динамическая цель vs full")
+plt.grid(True)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+# ---------------------------------------------------------
+# 13.2. Распределения времени шага (hist + boxplot)
+# ---------------------------------------------------------
+
+
+plt.figure(figsize=(12, 4))
+
+
+plt.subplot(1, 3, 1)
+sns.histplot(time_full, bins=20, kde=True, color="tab:blue")
+plt.title("Время шага (full)")
+plt.xlabel("time per step")
+
+
+plt.subplot(1, 3, 2)
+sns.histplot(time_partial, bins=20, kde=True, color="tab:orange")
+plt.title("Время шага (partial)")
+plt.xlabel("time per step")
+
+
+plt.subplot(1, 3, 3)
+sns.histplot(time_proposed, bins=20, kde=True, color="tab:green")
+plt.title("Время шага (proposed)")
+plt.xlabel("time per step")
+
+
+plt.tight_layout()
+plt.show()
+
+
+plt.figure(figsize=(6, 4))
+sns.boxplot(
+    data=pd.DataFrame(
+        {
+            "time": time_full + time_partial + time_proposed,
+            "method": ["full"] * len(time_full)
+            + ["partial"] * len(time_partial)
+            + ["proposed"] * len(time_proposed),
+        }
+    ),
+    x="method",
+    y="time",
+)
+plt.title("Boxplot времени шага по методам")
+plt.ylabel("time per step")
+plt.tight_layout()
+plt.show()
+
+
+# ---------------------------------------------------------
+# 13.3. Сводка по методам (dfsummary) и barplot'ы
+# ---------------------------------------------------------
+
+
+if dfsummary is not None:
+    display(dfsummary)
+
+
+    plt.figure(figsize=(14, 4))
+
+
+    plt.subplot(1, 3, 1)
+    sns.barplot(data=dfsummary, x="method", y="avgtime", palette="Blues")
+    plt.title("Среднее время шага")
+
+
+    plt.subplot(1, 3, 2)
+    sns.barplot(data=dfsummary, x="method", y="avgrelativegapF", palette="Reds")
+    plt.title("Среднее относительное отклонение F_dynamic, %")
+
+
+    plt.subplot(1, 3, 3)
+    sns.barplot(data=dfsummary, x="method", y="avgchangededges", palette="Greens")
+    plt.title("Среднее число изменённых дуг Φ")
+
+
+    plt.tight_layout()
+    plt.show()
+
+
+    # компромисс скорость–устойчивость
+    plt.figure(figsize=(6, 4))
+    plt.scatter(dfsummary["avgtime"], dfsummary["avgchangededges"], s=120)
+    for _, row in dfsummary.iterrows():
+        plt.text(
+            row["avgtime"],
+            row["avgchangededges"],
+            row["method"],
+            fontsize=10,
+            ha="center",
+            va="bottom",
+        )
+    plt.xlabel("avg time per step")
+    plt.ylabel("avg Φ (changed edges)")
+    plt.title("Компромисс: скорость vs устойчивость")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+# ---------------------------------------------------------
+# 13.4. Локализация пересчёта: Ecrit_fraction vs time_proposed
+# ---------------------------------------------------------
+
+
+Ecrit_fraction = globals().get("Ecrit_fraction", None)  # список длины T_vis
+
+
+if Ecrit_fraction is not None:
+    Ecrit_fraction = np.array(Ecrit_fraction, dtype=float)
+    t_arr = np.array(time_proposed, dtype=float)
+
+
+    plt.figure(figsize=(6, 4))
+    plt.scatter(Ecrit_fraction, t_arr, color="tab:green", alpha=0.7)
+    # линия тренда
+    if len(Ecrit_fraction) > 1:
+        k, b = np.polyfit(Ecrit_fraction, t_arr, 1)
+        xs = np.linspace(Ecrit_fraction.min(), Ecrit_fraction.max(), 100)
+        plt.plot(xs, k * xs + b, color="black", linestyle="--", label=f"trend: k={k:.3g}")
+    plt.xlabel("Доля критичных дуг |E_crit| / |E|")
+    plt.ylabel("time per step (proposed)")
+    plt.title("Локализация пересчёта: время vs доля критичных дуг")
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+print("Ячейка 13: финальный отчёт по времени, качеству и устойчивости для трёх методов.")

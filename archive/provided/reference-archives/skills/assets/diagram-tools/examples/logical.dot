@@ -1,0 +1,106 @@
+digraph LOGICAL {
+  rankdir=TB;
+  bgcolor="white";
+  graph [nodesep=0.7, ranksep=1.0, splines=spline];
+  node [shape=plaintext, fontname="Arial", fontsize=12];
+  edge [fontname="Arial", fontsize=11, color="#2C5F8D", penwidth=1.2];
+
+  users [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>Пользователь</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT">telegram_id (UQ)</TD></TR>
+    <TR><TD ALIGN="LEFT">username, имя</TD></TR>
+    <TR><TD ALIGN="LEFT">уведомления вкл., язык</TD></TR>
+    <TR><TD ALIGN="LEFT">e-mail, подтверждён, копии</TD></TR>
+    <TR><TD ALIGN="LEFT">хеш кода, срок, попытки</TD></TR>
+    <TR><TD ALIGN="LEFT">активен</TD></TR>
+   </TABLE>>];
+
+  products [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>Отслеживаемый товар</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> user_id</TD></TR>
+    <TR><TD ALIGN="LEFT">название, категория</TD></TR>
+    <TR><TD ALIGN="LEFT">пороговая цена</TD></TR>
+    <TR><TD ALIGN="LEFT">фильтры Kufar</TD></TR>
+    <TR><TD ALIGN="LEFT">слова-исключения</TD></TR>
+   </TABLE>>];
+
+  listings [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#2C5F8D"><FONT COLOR="white"><B>Объявление</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT">платформа + external_id (IDX)</TD></TR>
+    <TR><TD ALIGN="LEFT">заголовок, описание</TD></TR>
+    <TR><TD ALIGN="LEFT">цена, ссылка</TD></TR>
+    <TR><TD ALIGN="LEFT">дата публикации</TD></TR>
+   </TABLE>>];
+
+  matches [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#B5820A"><FONT COLOR="white"><B>Совпадение</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> tracked_product_id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> listing_id</TD></TR>
+    <TR><TD ALIGN="LEFT">выгода, вид события</TD></TR>
+    <TR><TD ALIGN="LEFT">доставлено / попыток</TD></TR>
+    <TR><TD ALIGN="LEFT">e-mail: отправлено / попыток</TD></TR>
+   </TABLE>>];
+
+  sent [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#B5820A"><FONT COLOR="white"><B>Отправленное уведомление</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> user_id, product_id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> listing_id, match_id</TD></TR>
+    <TR><TD ALIGN="LEFT">цена, скидка, дата</TD></TR>
+   </TABLE>>];
+
+  attrs [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#3C7D40"><FONT COLOR="white"><B>Атрибут фильтра</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT">категория Kufar</TD></TR>
+    <TR><TD ALIGN="LEFT">p, pu (код запроса)</TD></TR>
+    <TR><TD ALIGN="LEFT">название</TD></TR>
+   </TABLE>>];
+
+  values [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#3C7D40"><FONT COLOR="white"><B>Значение атрибута</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> attribute_id</TD></TR>
+    <TR><TD ALIGN="LEFT">код, подпись</TD></TR>
+    <TR><TD ALIGN="LEFT">родительский регион</TD></TR>
+   </TABLE>>];
+
+  custom [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#6B4E9B"><FONT COLOR="white"><B>Польз. атрибут</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT"><B>FK</B> tracked_product_id</TD></TR>
+    <TR><TD ALIGN="LEFT">имя, значение, приоритет</TD></TR>
+   </TABLE>>];
+
+  prices [label=<
+   <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+    <TR><TD BGCOLOR="#6B4E9B"><FONT COLOR="white"><B>Справочная цена</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><B>PK</B> id</TD></TR>
+    <TR><TD ALIGN="LEFT">запрос, платформа</TD></TR>
+    <TR><TD ALIGN="LEFT">мин/сред/макс цена</TD></TR>
+   </TABLE>>];
+
+  users    -> products [label="1:N"];
+  products -> matches  [label="1:N"];
+  listings -> matches  [label="1:N"];
+  products -> custom   [label="1:N"];
+  users    -> sent     [label="1:N"];
+  matches  -> sent     [label="1:N"];
+  attrs    -> values   [label="1:N"];
+
+  {rank=same; users; listings; attrs}
+  {rank=same; products; prices}
+  {rank=same; matches; values; custom}
+}

@@ -1,0 +1,647 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+import time # ==== БЛОК 1. БАЗОВЫЕ ФУНКЦИИ ДЛЯ ЗАДАЧИ О НАЗНАЧЕНИИ ====
+
+
+def solve_assignment_sap(C):
+    n, m = C.shape
+    if n <= m:
+        u = np.zeros(n)
+        v = np.zeros(m)
+        p = np.full(m + 1, -1, dtype=int)
+        way = np.zeros(m + 1, dtype=int)
+        for i in range(n):
+            p[0] = i
+            minv = np.full(m + 1, np.inf)
+            used = np.zeros(m + 1, dtype=bool)
+            j0 = 0
+            while True:
+                used[j0] = True
+                i0 = p[j0]
+                delta = np.inf
+                j1 = -1
+                for j in range(1, m + 1):
+                    if not used[j]:
+                        cur = C[i0, j - 1] - u[i0] - v[j - 1]
+                        if cur < minv[j]:
+                            minv[j] = cur
+                            way[j] = j0
+                        if minv[j] < delta:
+                            delta = minv[j]
+                            j1 = j
+                for j in range(m + 1):
+                    if used[j]:
+                        if j == 0:
+                            u[p[j]] += delta
+                        else:
+                            v[j - 1] -= delta
+                    else:
+                        minv[j] -= delta
+                j0 = j1
+                if p[j0] == -1:
+                    break
+            while True:
+                j1 = way[j0]
+                p[j0] = p[j1]
+                j0 = j1
+                if j0 == 0:
+                    break
+        match_row = np.full(n, -1, dtype=int)
+        for j in range(1, m + 1):
+            if p[j] != -1 and p[j] < n:
+                match_row[p[j]] = j - 1
+        X = np.zeros((n, m), dtype=int)
+        for i in range(n):
+            if match_row[i] >= 0:
+                X[i, match_row[i]] = 1
+        value = float(np.sum(C * X))
+        return X, u, v, value
+    else:
+        Ct = C.T
+        X_t, v, u, value = solve_assignment_sap(Ct)
+        X = X_t.T
+        return X, u, v, value
+
+
+def compute_stability_intervals(C, u, v, X):
+    n, m = C.shape
+    red_costs = np.zeros_like(C)
+    for i in range(n):
+        for j in range(m):
+            red_costs[i, j] = C[i, j] - u[i] - v[j]
+    std_c = float(np.std(C)) + 1e-6
+    std_r = float(np.std(red_costs)) + 1e-6
+    c_min = np.zeros_like(C)
+    c_max = np.zeros_like(C)
+    for i in range(n):
+        for j in range(m):
+            if X[i, j] == 1:
+                width = 2.5 * std_c + 1.5 * std_r
+            else:
+                width = 0.8 * std_c + 0.5 * std_r
+            base = C[i, j]
+            c_min[i, j] = base - width
+            c_max[i, j] = base + width
+    return c_min, c_max
+
+
+def extract_critical_submatrix(C, crit_mask):
+    rows = np.where(np.any(crit_mask, axis=1))[0]
+    cols = np.where(np.any(crit_mask, axis=0))[0]
+    if rows.size == 0 or cols.size == 0:
+        return C.copy(), np.arange(C.shape[0]), np.arange(C.shape[1])
+    C_sub = C[np.ix_(rows, cols)]
+    return C_sub, rows, cols
+
+
+def dynamic_cost_update(C_prev, sigma, jump_prob, jump_scale, rng):
+    n, m = C_prev.shape
+    noise = rng.normal(0.0, sigma, size=(n, m))
+    C_new = C_prev + noise
+    jumps_mask = rng.rand(n, m) < jump_prob
+    jumps = rng.normal(0.0, jump_scale, size=(n, m))
+    C_new = C_new + jumps_mask * jumps
+    return C_new
+
+
+def generate_initial_cost_matrix(n, low, high, rng):
+    return rng.uniform(low, high, size=(n, n))
+
+
+def count_changed_arcs(X_old, X_new):
+    return int(np.sum(np.abs(X_old - X_new)) // 2)
+
+
+def method_full_recompute(C, X_prev):
+    t0 = time.time()
+    X_new, u_new, v_new, value = solve_assignment_sap(C)
+    t1 = time.time()
+    if X_prev is None:
+        changes = 0
+    else:
+        changes = count_changed_arcs(X_prev, X_new)
+    return X_new, u_new, v_new, value, changes, (t1 - t0)
+
+
+def select_random_submatrix_mask(n, density, rng):
+    mask = rng.rand(n, n) < density
+    rows = np.where(np.any(mask, axis=1))[0]
+    cols = np.where(np.any(mask, axis=0))[0]
+    if rows.size == 0 or cols.size == 0:
+        k = max(1, int(0.1 * n))
+        rows = rng.choice(n, size=k, replace=False)
+        cols = rng.choice(n, size=k, replace=False)
+    return rows, cols
+
+
+def method_basic_reoptimization(C, X_prev, u_prev, v_prev, lam, rng, density=0.15):
+    n, m = C.shape
+    t0 = time.time()
+    if X_prev is None:
+        X_new, u_new, v_new, value = solve_assignment_sap(C)
+        t1 = time.time()
+        return X_new, u_new, v_new, value, 0, (t1 - t0)
+    rows, cols = select_random_submatrix_mask(n, density, rng)
+    C_sub = C[np.ix_(rows, cols)]
+    X_sub, u_sub, v_sub, value_sub = solve_assignment_sap(C_sub)
+    X_new = X_prev.copy()
+    for ii, i in enumerate(rows):
+        for jj, j in enumerate(cols):
+            if X_sub[ii, jj] == 1:
+                X_new[i, :] = 0
+                X_new[:, j] = 0
+    for ii, i in enumerate(rows):
+        for jj, j in enumerate(cols):
+            if X_sub[ii, jj] == 1:
+                X_new[i, j] = 1
+    u_new = u_prev.copy()
+    v_new = v_prev.copy()
+    for idx, i in enumerate(rows):
+        u_new[i] = u_sub[idx]
+    for idx, j in enumerate(cols):
+        v_new[j] = v_sub[idx]
+    base_value = float(np.sum(C * X_new))
+    changes = count_changed_arcs(X_prev, X_new)
+    value_with_penalty = base_value + lam * changes
+    t1 = time.time()
+    return X_new, u_new, v_new, value_with_penalty, changes, (t1 - t0)
+
+
+def method_proposed(C, X_prev, u_prev, v_prev, c_min_prev, c_max_prev, lam):
+    n, m = C.shape
+    t0 = time.time()
+    if X_prev is None or c_min_prev is None or c_max_prev is None:
+        X_new, u_new, v_new, value = solve_assignment_sap(C)
+        t1 = time.time()
+        return X_new, u_new, v_new, value, 0, 0, (t1 - t0)
+    crit_mask = (C < c_min_prev) | (C > c_max_prev)
+    num_crit = int(np.sum(crit_mask))
+    if num_crit == 0:
+        X_new = X_prev.copy()
+        u_new = u_prev.copy()
+        v_new = v_prev.copy()
+        base_value = float(np.sum(C * X_new))
+        changes = 0
+        value_with_penalty = base_value + lam * changes
+        t1 = time.time()
+        return X_new, u_new, v_new, value_with_penalty, changes, num_crit, (t1 - t0)
+    C_sub, rows, cols = extract_critical_submatrix(C, crit_mask)
+    X_sub, u_sub, v_sub, value_sub = solve_assignment_sap(C_sub)
+    X_new = X_prev.copy()
+    for ii, i in enumerate(rows):
+        for jj, j in enumerate(cols):
+            if X_sub[ii, jj] == 1:
+                X_new[i, :] = 0
+                X_new[:, j] = 0
+    for ii, i in enumerate(rows):
+        for jj, j in enumerate(cols):
+            if X_sub[ii, jj] == 1:
+                X_new[i, j] = 1
+    u_new = u_prev.copy()
+    v_new = v_prev.copy()
+    for idx, i in enumerate(rows):
+        u_new[i] = u_sub[idx]
+    for idx, j in enumerate(cols):
+        v_new[j] = v_sub[idx]
+    base_value = float(np.sum(C * X_new))
+    changes = count_changed_arcs(X_prev, X_new)
+    value_with_penalty = base_value + lam * changes
+    t1 = time.time()
+    return X_new, u_new, v_new, value_with_penalty, changes, num_crit, (t1 - t0)  # ==== БЛОК 2. РИСУНОК 1: СТРУКТУРА СЦЕНАРИЯ ====
+
+
+def plot_structure_figure():
+    G = nx.Graph()
+    left_nodes = [f"A{i}" for i in range(1, 6)]
+    right_nodes = [f"T{j}" for j in range(1, 8)]
+    for a in left_nodes:
+        G.add_node(a, bipartite=0)
+    for t in right_nodes:
+        G.add_node(t, bipartite=1)
+
+
+    edges = []
+    edges.extend([("A1", "T1"), ("A1", "T2"), ("A1", "T3")])
+    edges.extend([("A2", "T1"), ("A2", "T2"), ("A2", "T3"), ("A2", "T4")])
+    edges.extend([("A3", "T2"), ("A3", "T3"), ("A3", "T4"), ("A3", "T5")])
+    edges.extend([("A4", "T3"), ("A4", "T4"), ("A4", "T5"), ("A4", "T6")])
+    edges.extend([("A5", "T4"), ("A5", "T5"), ("A5", "T6"), ("A5", "T7")])
+    G.add_edges_from(edges)
+
+
+    pos = {}
+    for idx, a in enumerate(left_nodes):
+        pos[a] = (0, idx)
+    step = (len(left_nodes) - 1) / (len(right_nodes) - 1)
+    for idx, t in enumerate(right_nodes):
+        pos[t] = (1, idx * step)
+
+
+    plt.figure(figsize=(8, 6))
+    colors = ["red", "blue", "green", "orange", "purple"]
+    for i, a in enumerate(left_nodes):
+        incident_edges = [(a, v) for v in G.neighbors(a)]
+        nx.draw_networkx_edges(G, pos, edgelist=incident_edges, edge_color=colors[i], width=2)
+    nx.draw_networkx_nodes(G, pos, nodelist=left_nodes, node_color="lightgray", node_size=800)
+    nx.draw_networkx_nodes(G, pos, nodelist=right_nodes, node_color="white", edgecolors="black", node_size=800)
+    labels = {}
+    for a in left_nodes:
+        labels[a] = a
+    for t in right_nodes:
+        labels[t] = t
+    nx.draw_networkx_labels(G, pos, labels, font_size=12)
+    plt.title("Структура экспериментального сценария\n(агенты, задачи, двудольный граф назначения)")
+    plt.axis("off")
+    plt.tight_layout()
+    plt.show()
+
+
+# ВЫЗОВ БЛОКА 2
+plot_structure_figure() # ==== БЛОК 3. ОДИН СЦЕНАРИЙ ДЛЯ НАГЛЯДНОСТИ (БЕЗ ЦИКЛА ПО ВСЕМ) ====
+
+
+def run_single_scenario(n=100, T=10, runs=2, sigma=1.0, jump_prob=0.001, jump_scale=10.0, lam_base=0.1, seed_global=42):
+    results = []
+    rng_global = np.random.RandomState(seed_global)
+    scen = {"n": n, "target_crit": 0.0, "jump_prob": jump_prob, "jump_scale": jump_scale}
+    jump_prob = scen["jump_prob"]
+    jump_scale = scen["jump_scale"]
+    for run in range(runs):
+        seed = rng_global.randint(0, 1000000)
+        rng = np.random.RandomState(seed)
+        C = generate_initial_cost_matrix(n, 0.0, 100.0, rng)
+        X_full_prev, u_full_prev, v_full_prev, val_full_prev = solve_assignment_sap(C)
+        X_base_prev = X_full_prev.copy()
+        u_base_prev = u_full_prev.copy()
+        v_base_prev = v_full_prev.copy()
+        X_prop_prev = X_full_prev.copy()
+        u_prop_prev = u_full_prev.copy()
+        v_prop_prev = v_full_prev.copy()
+        c_min_prev, c_max_prev = compute_stability_intervals(C, u_full_prev, v_full_prev, X_full_prev)
+        times_full = []
+        times_base = []
+        times_prop = []
+        dev_base = []
+        dev_prop = []
+        changes_full = []
+        changes_base = []
+        changes_prop = []
+        crit_counts = []
+        for t in range(1, T + 1):
+            C = dynamic_cost_update(C, sigma, jump_prob, jump_scale, rng)
+            X_full, u_full, v_full, val_full, ch_full, dt_full = method_full_recompute(C, X_full_prev)
+            times_full.append(dt_full)
+            changes_full.append(ch_full)
+            X_full_prev = X_full
+            u_full_prev = u_full
+            v_full_prev = v_full
+            X_base, u_base, v_base, val_base_pen, ch_base, dt_base = method_basic_reoptimization(
+                C, X_base_prev, u_base_prev, v_base_prev, lam_base, rng
+            )
+            times_base.append(dt_base)
+            changes_base.append(ch_base)
+            dev_b = 0.0
+            if val_full != 0.0:
+                dev_b = 100.0 * (val_base_pen - val_full) / abs(val_full)
+            dev_base.append(dev_b)
+            X_base_prev = X_base
+            u_base_prev = u_base
+            v_base_prev = v_base
+            X_prop, u_prop, v_prop, val_prop_pen, ch_prop, num_crit, dt_prop = method_proposed(
+                C, X_prop_prev, u_prop_prev, v_prop_prev, c_min_prev, c_max_prev, lam_base
+            )
+            times_prop.append(dt_prop)
+            changes_prop.append(ch_prop)
+            crit_counts.append(num_crit)
+            dev_p = 0.0
+            if val_full != 0.0:
+                dev_p = 100.0 * (val_prop_pen - val_full) / abs(val_full)
+            dev_prop.append(dev_p)
+            X_prop_prev = X_prop
+            u_prop_prev = u_prop
+            v_prop_prev = v_prop
+            c_min_prev, c_max_prev = compute_stability_intervals(C, u_prop_prev, v_prop_prev, X_prop_prev)
+        scen_name = f"{n}, одиночный сценарий"
+        avg_time_full_ms = 1000.0 * float(np.mean(times_full))
+        avg_time_base_ms = 1000.0 * float(np.mean(times_base))
+        avg_time_prop_ms = 1000.0 * float(np.mean(times_prop))
+        sum_time_full_s = float(np.sum(times_full))
+        sum_time_base_s = float(np.sum(times_base))
+        sum_time_prop_s = float(np.sum(times_prop))
+        avg_dev_base = float(np.mean(dev_base))
+        avg_dev_prop = float(np.mean(dev_prop))
+        avg_ch_full = float(np.mean(changes_full))
+        avg_ch_base = float(np.mean(changes_base))
+        avg_ch_prop = float(np.mean(changes_prop))
+        avg_crit = float(np.mean(crit_counts))
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Полный пересчёт",
+            "Среднее время шага, мс": avg_time_full_ms,
+            "Суммарное время серии, с": sum_time_full_s,
+            "Отклонение целевой функции, %": 0.0,
+            "Среднее число изменённых дуг": avg_ch_full,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Базовая реоптимизация",
+            "Среднее время шага, мс": avg_time_base_ms,
+            "Суммарное время серии, с": sum_time_base_s,
+            "Отклонение целевой функции, %": avg_dev_base,
+            "Среднее число изменённых дуг": avg_ch_base,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Предлагаемый алгоритм",
+            "Среднее время шага, мс": avg_time_prop_ms,
+            "Суммарное время серии, с": sum_time_prop_s,
+            "Отклонение целевой функции, %": avg_dev_prop,
+            "Среднее число изменённых дуг": avg_ch_prop,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+    df = pd.DataFrame(results)
+    return df
+
+
+single_results = run_single_scenario(n=80, T=10, runs=2)
+print(single_results) # ==== БЛОК 4.1. ПАРАМЕТРЫ ЭКСПЕРИМЕНТОВ И ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ДЛЯ ОДНОГО СЦЕНАРИЯ ====
+
+
+
+def run_single_experiment_for_scenario(scen, T, runs, sigma, lam_base, rng_global):
+    n = scen["n"]
+    jump_prob = scen["jump_prob"]
+    jump_scale = scen["jump_scale"]
+    results = []
+    for run in range(runs):
+        seed = rng_global.randint(0, 1000000)
+        rng = np.random.RandomState(seed)
+        C = generate_initial_cost_matrix(n, 0.0, 100.0, rng)
+        X_full_prev, u_full_prev, v_full_prev, val_full_prev = solve_assignment_sap(C)
+        X_base_prev = X_full_prev.copy()
+        u_base_prev = u_full_prev.copy()
+        v_base_prev = v_full_prev.copy()
+        X_prop_prev = X_full_prev.copy()
+        u_prop_prev = u_full_prev.copy()
+        v_prop_prev = v_full_prev.copy()
+        c_min_prev, c_max_prev = compute_stability_intervals(C, u_full_prev, v_full_prev, X_full_prev)
+        times_full = []
+        times_base = []
+        times_prop = []
+        dev_base = []
+        dev_prop = []
+        changes_full = []
+        changes_base = []
+        changes_prop = []
+        crit_counts = []
+        for t in range(1, T + 1):
+            C = dynamic_cost_update(C, sigma, jump_prob, jump_scale, rng)
+            X_full, u_full, v_full, val_full, ch_full, dt_full = method_full_recompute(C, X_full_prev)
+            times_full.append(dt_full)
+            changes_full.append(ch_full)
+            X_full_prev = X_full
+            u_full_prev = u_full
+            v_full_prev = v_full
+            X_base, u_base, v_base, val_base_pen, ch_base, dt_base = method_basic_reoptimization(
+                C, X_base_prev, u_base_prev, v_base_prev, lam_base, rng
+            )
+            times_base.append(dt_base)
+            changes_base.append(ch_base)
+            dev_b = 0.0
+            if val_full != 0.0:
+                dev_b = 100.0 * (val_base_pen - val_full) / abs(val_full)
+            dev_base.append(dev_b)
+            X_base_prev = X_base
+            u_base_prev = u_base
+            v_base_prev = v_base
+            X_prop, u_prop, v_prop, val_prop_pen, ch_prop, num_crit, dt_prop = method_proposed(
+                C, X_prop_prev, u_prop_prev, v_prop_prev, c_min_prev, c_max_prev, lam_base
+            )
+            times_prop.append(dt_prop)
+            changes_prop.append(ch_prop)
+            crit_counts.append(num_crit)
+            dev_p = 0.0
+            if val_full != 0.0:
+                dev_p = 100.0 * (val_prop_pen - val_full) / abs(val_full)
+            dev_prop.append(dev_p)
+            X_prop_prev = X_prop
+            u_prop_prev = u_prop
+            v_prop_prev = v_prop
+            c_min_prev, c_max_prev = compute_stability_intervals(C, u_prop_prev, v_prop_prev, X_prop_prev)
+        scen_name = f"{n}, {int(scen['target_crit'] * 100)}%"
+        avg_time_full_ms = 1000.0 * float(np.mean(times_full))
+        avg_time_base_ms = 1000.0 * float(np.mean(times_base))
+        avg_time_prop_ms = 1000.0 * float(np.mean(times_prop))
+        sum_time_full_s = float(np.sum(times_full))
+        sum_time_base_s = float(np.sum(times_base))
+        sum_time_prop_s = float(np.sum(times_prop))
+        avg_dev_base = float(np.mean(dev_base))
+        avg_dev_prop = float(np.mean(dev_prop))
+        avg_ch_full = float(np.mean(changes_full))
+        avg_ch_base = float(np.mean(changes_base))
+        avg_ch_prop = float(np.mean(changes_prop))
+        avg_crit = float(np.mean(crit_counts))
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Полный пересчёт",
+            "Среднее время шага, мс": avg_time_full_ms,
+            "Суммарное время серии, с": sum_time_full_s,
+            "Отклонение целевой функции, %": 0.0,
+            "Среднее число изменённых дуг": avg_ch_full,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Базовая реоптимизация",
+            "Среднее время шага, мс": avg_time_base_ms,
+            "Суммарное время серии, с": sum_time_base_s,
+            "Отклонение целевой функции, %": avg_dev_base,
+            "Среднее число изменённых дуг": avg_ch_base,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+        results.append({
+            "Сценарий": scen_name,
+            "Метод": "Предлагаемый алгоритм",
+            "Среднее время шага, мс": avg_time_prop_ms,
+            "Суммарное время серии, с": sum_time_prop_s,
+            "Отклонение целевой функции, %": avg_dev_prop,
+            "Среднее число изменённых дуг": avg_ch_prop,
+            "Среднее число критичных дуг (для сценария)": avg_crit / (n * n)
+        })
+    return results # ==== БЛОК 4.2. ОТДЕЛЬНЫЕ ФУНКЦИИ ДЛЯ КАЖДОГО СЦЕНАРИЯ ====
+
+
+
+def run_dynamic_experiments_scenario_50():
+    scen = {"n": 50, "target_crit": 0.01, "jump_prob": 0.0005, "jump_scale": 10.0}
+    T = 30
+    runs = 5
+    sigma = 1.0
+    lam_base = 0.1
+    rng_global = np.random.RandomState(42)
+    results = run_single_experiment_for_scenario(scen, T, runs, sigma, lam_base, rng_global)
+    df = pd.DataFrame(results)
+    return df
+
+
+
+def run_dynamic_experiments_scenario_200():
+    scen = {"n": 200, "target_crit": 0.05, "jump_prob": 0.0015, "jump_scale": 10.0}
+    T = 30
+    runs = 5
+    sigma = 1.0
+    lam_base = 0.1
+    rng_global = np.random.RandomState(42)
+    results = run_single_experiment_for_scenario(scen, T, runs, sigma, lam_base, rng_global)
+    df = pd.DataFrame(results)
+    return df
+
+
+
+def run_dynamic_experiments_scenario_500():
+    scen = {"n": 500, "target_crit": 0.10, "jump_prob": 0.0025, "jump_scale": 10.0}
+    T = 30
+    runs = 5
+    sigma = 1.0
+    lam_base = 0.1
+    rng_global = np.random.RandomState(42)
+    results = run_single_experiment_for_scenario(scen, T, runs, sigma, lam_base, rng_global)
+    df = pd.DataFrame(results)
+    return df # ==== БЛОК 4.3. ОБЪЕДИНЕНИЕ РЕЗУЛЬТАТОВ ПО ВСЕМ СЦЕНАРИЯМ ====
+
+
+
+def run_dynamic_experiments_all():
+    df50 = run_dynamic_experiments_scenario_50()
+    df200 = run_dynamic_experiments_scenario_200()
+    df500 = run_dynamic_experiments_scenario_500()
+    df = pd.concat([df50, df200, df500], ignore_index=True)
+    grouped = df.groupby(["Сценарий", "Метод"], as_index=False).agg({
+        "Среднее время шага, мс": "mean",
+        "Суммарное время серии, с": "mean",
+        "Отклонение целевой функции, %": "mean",
+        "Среднее число изменённых дуг": "mean",
+        "Среднее число критичных дуг (для сценария)": "mean"
+    })
+    grouped.to_csv("результаты_эксперимента.csv", index=False, encoding="utf-8-sig")
+    return grouped # ==== БЛОК 4.4. ЗАПУСК ПОЛНОГО ЭКСПЕРИМЕНТА ====
+
+
+
+full_table = run_dynamic_experiments_all()
+print(full_table.head()) # ==== БЛОК 5.1. ГРАФИК ВРЕМЕНИ И УСКОРЕНИЯ (РИСУНОК 2) ====
+
+
+
+def plot_time_and_speedup_figure(df):
+    scenarios = sorted(df["Сценарий"].unique(), key=lambda x: int(x.split(",")[0]))
+    methods = ["Полный пересчёт", "Базовая реоптимизация", "Предлагаемый алгоритм"]
+    crit_shares = []
+    avg_times = {m: [] for m in methods}
+    for scen in scenarios:
+        df_scen = df[df["Сценарий"] == scen]
+        crit_share = float(df_scen["Среднее число критичных дуг (для сценария)"].mean())
+        crit_shares.append(100.0 * crit_share)
+        for m in methods:
+            val = float(df_scen[df_scen["Метод"] == m]["Среднее время шага, мс"])
+            avg_times[m].append(val)
+    crit_shares = np.array(crit_shares)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    for m in methods:
+        ax1.plot(crit_shares, avg_times[m], marker="o", label=m)
+    ax1.set_ylabel("Среднее время шага, мс")
+    ax1.set_title("Рисунок 2. Время решения шага\nи ускорение относительно полного пересчёта")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    ax1.legend()
+    speedup_base = []
+    speedup_prop = []
+    for i in range(len(crit_shares)):
+        t_full = avg_times["Полный пересчёт"][i]
+        t_base = avg_times["Базовая реоптимизация"][i]
+        t_prop = avg_times["Предлагаемый алгоритм"][i]
+        speedup_base.append(t_full / t_base if t_base > 0 else 1.0)
+        speedup_prop.append(t_full / t_prop if t_prop > 0 else 1.0)
+    ax2.plot(crit_shares, speedup_base, marker="s", label="Ускорение: Базовая реоптимизация")
+    ax2.plot(crit_shares, speedup_prop, marker="^", label="Ускорение: Предлагаемый алгоритм")
+    ax2.set_xlabel("Доля критичных дуг, %")
+    ax2.set_ylabel("Ускорение t_full / t_method")
+    ax2.grid(True, linestyle="--", alpha=0.5)
+    ax2.legend()
+    plt.tight_layout()
+    plt.show() # ==== БЛОК 5.2. ЭКСПЕРИМЕНТЫ ПО λ ДЛЯ ПРЕДЛАГАЕМОГО АЛГОРИТМА ====
+
+
+
+def run_lambda_experiments():
+    n = 200
+    T = 30
+    runs = 3
+    sigma = 1.0
+    jump_prob = 0.0015
+    jump_scale = 10.0
+    lambdas = [0.0, 0.05, 0.1, 0.2, 0.3]
+    rng_global = np.random.RandomState(123)
+    deviations = []
+    changes_list = []
+    for lam in lambdas:
+        dev_vals = []
+        ch_vals = []
+        for run in range(runs):
+            seed = rng_global.randint(0, 1000000)
+            rng = np.random.RandomState(seed)
+            C = generate_initial_cost_matrix(n, 0.0, 100.0, rng)
+            X_full_prev, u_full_prev, v_full_prev, val_full_prev = solve_assignment_sap(C)
+            X_prop_prev = X_full_prev.copy()
+            u_prop_prev = u_full_prev.copy()
+            v_prop_prev = v_full_prev.copy()
+            c_min_prev, c_max_prev = compute_stability_intervals(C, u_prop_prev, v_prop_prev, X_prop_prev)
+            for t in range(1, T + 1):
+                C = dynamic_cost_update(C, sigma, jump_prob, jump_scale, rng)
+                X_full, u_full, v_full, val_full, ch_full, dt_full = method_full_recompute(C, X_full_prev)
+                X_full_prev = X_full
+                u_full_prev = u_full
+                v_full_prev = v_full
+                X_prop, u_prop, v_prop, val_prop_pen, ch_prop, num_crit, dt_prop = method_proposed(
+                    C, X_prop_prev, u_prop_prev, v_prop_prev, c_min_prev, c_max_prev, lam
+                )
+                if val_full != 0.0:
+                    dev = 100.0 * (val_prop_pen - val_full) / abs(val_full)
+                    dev_vals.append(dev)
+                ch_vals.append(ch_prop)
+                X_prop_prev = X_prop
+                u_prop_prev = u_prop
+                v_prop_prev = v_prop
+                c_min_prev, c_max_prev = compute_stability_intervals(C, u_prop_prev, v_prop_prev, X_prop_prev)
+        deviations.append(float(np.mean(dev_vals)) if len(dev_vals) > 0 else 0.0)
+        changes_list.append(float(np.mean(ch_vals)) if len(ch_vals) > 0 else 0.0)
+    return lambdas, deviations, changes_list # ==== БЛОК 5.3. ГРАФИК КОМПРОМИССА ПО λ (РИСУНОК 3) ====
+
+
+
+def plot_lambda_tradeoff(lambdas, deviations, changes_list):
+    fig, ax1 = plt.subplots(figsize=(8, 6))
+    ax1.set_xlabel("λ")
+    ax1.set_ylabel("Отклонение целевой функции, %", color="red")
+    ax1.plot(lambdas, deviations, marker="o", color="red", label="Отклонение целевой функции, %")
+    ax1.tick_params(axis="y", labelcolor="red")
+    ax1.grid(True, linestyle="--", alpha=0.5)
+    ax2 = ax1.twinx()
+    ax2.set_ylabel("Среднее число изменённых дуг", color="blue")
+    ax2.plot(lambdas, changes_list, marker="s", color="blue", label="Среднее число изменённых дуг")
+    ax2.tick_params(axis="y", labelcolor="blue")
+    plt.title("Рисунок 3. Компромисс между оптимальностью и устойчивостью\n(зависимость от λ)")
+    fig.tight_layout()
+    plt.show() # ==== БЛОК 5.4. ПОСЛЕДОВАТЕЛЬНЫЙ ЗАПУСК ПОСТРОЕНИЯ РИСУНКОВ 2 И 3 ====
+
+
+
+full_table = run_dynamic_experiments_all()
+print(full_table.head())
+plot_time_and_speedup_figure(full_table)
+lambdas, deviations, changes_list = run_lambda_experiments()
+plot_lambda_tradeoff(lambdas, deviations, changes_list)
+print("Графики и таблица с результатами сгенерированы.")

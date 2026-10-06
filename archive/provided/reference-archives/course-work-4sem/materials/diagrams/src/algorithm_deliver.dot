@@ -1,0 +1,47 @@
+digraph deliver {
+  rankdir=TB; bgcolor="white"; splines=polyline; nodesep=0.55; ranksep=0.5;
+  node [fontname="DejaVu Sans", fontsize=12, color="#333333", penwidth=1.2, style=filled, fillcolor=white];
+  edge [fontname="DejaVu Sans", fontsize=11, color="#333333", penwidth=1.2, arrowhead=none];
+
+  start  [shape=box, style="rounded,filled", label="Начало"];
+  conn   [shape=circle, width=0.4, fixedsize=true, label="Б"];
+  sel    [shape=box, label="Выбрать недоставленные совпадения:\nпопыток меньше пяти, возраст до трёх суток"];
+  d1     [shape=diamond, height=1.2, width=3.0, label="Остались\nсовпадения?"];
+  d2     [shape=diamond, height=1.3, width=3.4, label="Исчерпан часовой\nили суточный лимит?"];
+  keep   [shape=box, label="Оставить в очереди"];
+  c1     [shape=circle, width=0.4, fixedsize=true, label="Б"];
+  d3     [shape=diamond, height=1.4, width=3.6, label="Объявление отправлялось\nпо такой же или\nменьшей цене?"];
+  dup    [shape=box, label="Закрыть совпадение\nкак дубликат"];
+  c2     [shape=circle, width=0.4, fixedsize=true, label="Б"];
+  send   [shape=parallelogram, width=3.8, label="Отправить уведомление в Telegram"];
+  d4     [shape=diamond, height=1.2, width=3.0, label="Сообщение\nпринято?"];
+  ok     [shape=box, label="Отметить доставку,\nзаписать в журнал уведомлений"];
+  c3     [shape=circle, width=0.4, fixedsize=true, label="Б"];
+  fail   [shape=box, label="Увеличить число попыток,\nсохранить текст ошибки"];
+  c4     [shape=circle, width=0.4, fixedsize=true, label="Б"];
+  commit [shape=box, label="Зафиксировать транзакцию"];
+  stop   [shape=box, style="rounded,filled", label="Конец"];
+
+  start -> sel -> d1;
+  conn -> d1 [arrowhead=normal];
+  d1 -> d2 [label="да"];
+  d1 -> commit [label="нет"];
+  commit -> stop;
+  d2 -> keep [label="да"];
+  keep -> c1;
+  d2 -> d3 [label="нет"];
+  d3 -> dup [label="да"];
+  dup -> c2;
+  d3 -> send [label="нет"];
+  send -> d4;
+  d4 -> ok [label="да"];
+  d4 -> fail [label="нет"];
+  ok -> c3;
+  fail -> c4;
+
+  { rank=same; conn; d1; commit; }
+  { rank=same; d2; keep; }
+  { rank=same; d3; dup; }
+  { rank=same; ok; fail; }
+  { rank=same; c3; c4; }
+}

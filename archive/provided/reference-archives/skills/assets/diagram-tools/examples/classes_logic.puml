@@ -1,0 +1,124 @@
+@startuml
+' Диаграмма классов модулей обработки. Без пакетов, имена -- как в коде.
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam nodesep 28
+skinparam ranksep 42
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam class {
+  BackgroundColor white
+  BorderColor black
+  BorderThickness 1.5
+  ArrowColor black
+  FontStyle plain
+  FontName Arial
+  AttributeFontStyle plain
+  AttributeFontName Arial
+  StereotypeFontStyle plain
+}
+hide empty members
+hide circle
+top to bottom direction
+
+class jobs <<module>> {
+  + scrape_and_match_job()
+  + deliver_notifications_job()
+  + deliver_email_copies_job()
+  + cleanup_old_data_job()
+  + refresh_kufar_schema_job()
+}
+
+class BaseScraper <<abstract>> {
+  # _rate_limit()
+  # _get()
+  + close()
+  + platform()
+  + search()
+  + fetch_listing()
+}
+
+class KufarScraper {
+  + platform()
+  + search()
+  + search_iter()
+  + fetch_listing()
+  - _build_params()
+  - _parse_search_response()
+  - _parse_ad()
+}
+
+class CategoryStrategy {
+  kufar_cat_id
+  base_filters
+  attribute_order
+  range_filters
+  --
+  is_deep()
+  range_filter()
+}
+
+class ScrapedListing {
+  platform
+  external_id
+  title
+  price_byn
+  posted_at
+}
+
+class engine <<module>> {
+  + persist_listing()
+  + match_listings_for_product()
+  - _discount_vs_threshold()
+  - _requeue()
+}
+
+class MatchEvent {
+  match
+  listing
+  kind
+  old_price
+}
+
+class sender <<module>> {
+  + send_deal_notification()
+  + dispatch_new_matches()
+  + pending_matches()
+  + deliver_pending()
+  + give_up_on_stale()
+  - _min_sent_price()
+  - _mark_duplicate()
+}
+
+class limits <<module>> {
+  + is_admin()
+  + limit_for()
+  + count_for_user()
+  + count_total()
+  + check_can_add()
+}
+
+class LimitStatus {
+  allowed
+  used
+  limit
+  total_used
+}
+
+
+BaseScraper <|-- KufarScraper
+jobs ..> KufarScraper : опрашивает
+jobs ..> engine : вызывает
+jobs ..> sender : вызывает
+KufarScraper ..> CategoryStrategy : читает
+KufarScraper ..> ScrapedListing : создаёт
+engine ..> ScrapedListing : принимает
+engine ..> MatchEvent : возвращает
+sender ..> MatchEvent : доставляет
+limits ..> LimitStatus : возвращает
+
+jobs -[hidden]down- BaseScraper
+engine -[hidden]down- sender
+@enduml

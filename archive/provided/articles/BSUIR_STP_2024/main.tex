@@ -1,0 +1,58 @@
+\documentclass{bsuir_stp} % Наш файл класса bsuir_stp.cls
+
+% Подключаем дополнительные пакеты для специфических таблиц и графики
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{booktabs}
+
+\begin{document}
+
+% --- БЛОК 1: ПЕРЕДНИЕ СТРАНИЦЫ (Без номеров, но учитываются в счетчике) ---
+\include{title_page}      % Стр. 1: Титульный лист
+\include{title_back}      % Стр. 2: Оборот титульного (решение комиссии)
+\include{assignment}      % Стр. 3: Задание (на 1 листе)
+\include{blank_pockets}   % Стр. 4-5: Место для отзыва и рецензии
+
+% --- БЛОК 2: РЕФЕРАТ И ОГЛАВЛЕНИЕ (Появление нумерации) ---
+\pagenumbering{arabic}
+\setcounter{page}{6}      % Номер страницы, с которой начинается Реферат 
+
+\include{abstract}        % Реферат
+\include{definitions}     % Перечень терминов и определений
+
+\tableofcontents          % Автоматическое СОДЕРЖАНИЕ
+\newpage
+
+\include{content_graphics} % Перечень графического материала
+\include{introduction}     % ВВЕДЕНИЕ
+
+% --- БЛОК 3: ОСНОВНАЯ ЧАСТЬ (Главы) ---
+\include{chapter1}        % Обзор и анализ
+\include{chapter2}        % Выбор решений
+\include{chapter3}        % Аппаратная часть
+\include{chapter4}        % Программная часть
+
+% --- БЛОК 4: СПЕЦИАЛЬНЫЕ РАЗДЕЛЫ ---
+\include{economics}       % Экономическое обоснование
+\include{safety}          % Охрана труда
+
+% --- БЛОК 5: ЗАКЛЮЧЕНИЕ И ИСТОЧНИКИ ---
+\include{conclusion}      % ЗАКЛЮЧЕНИЕ
+\include{references}      % СПИСОК ИСТОЧНИКОВ
+
+% --- БЛОК 6: ПРИЛОЖЕНИЯ ---
+\appendix % Переключение нумерации на буквы (А, Б, В...)
+
+\include{appendices}              % Листинги кода
+\include{program_description}     % Описание программы (ЕСПД)
+\include{operator_manual}         % Руководство оператора (ЕСПД)
+\include{software_specification}  % Спецификация ПО
+\include{elements_list}           % Перечень элементов (для схем)
+\include{economic_efficiency_table} % Таблица ТЭП
+\include{standard_units_ref}      % Справочные данные СИ
+
+% --- БЛОК 7: ФИНАЛЬНЫЕ ЛИСТЫ ПЗ ---
+\include{document_register}       % Ведомость документов
+\include{change_log}              % Лист регистрации изменений
+
+\end{document}

@@ -1,0 +1,94 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 11
+skinparam entityBackgroundColor White
+skinparam entityBorderColor Black
+skinparam ArrowColor Black
+
+entity "groups" {
+  * id : Integer <<PK>>
+  --
+  group : Integer
+  och_type_default : Integer
+  moderator_id : BigInteger
+  tracked_subjects : JSON
+  users_list : JSON
+  extra_data : JSON
+}
+
+entity "users" {
+  * id : Integer <<PK>>
+  --
+  user_id : BigInteger
+  username : String
+  first_name : String
+  last_name : String
+  group : Integer <<FK>>
+  subgroup : Integer
+}
+
+entity "disciplines" {
+  * id : Integer <<PK>>
+  --
+  group : Integer <<FK>>
+  title : String
+  start_time : DateTime
+  end_time : DateTime
+  last_user_id : Integer <<FK>>
+}
+
+entity "user_discipline" {
+  * id : Integer <<PK>>
+  --
+  user_id : BigInteger <<FK>>
+  discipline_id : Integer <<FK>>
+  want : Boolean
+  want_time : DateTime
+  position : Integer
+}
+
+entity "last_users" {
+  * id : Integer <<PK>>
+  --
+  group : Integer <<FK>>
+  title : String
+  type : String
+  subgroup : Integer
+  first : Integer
+  last : Integer
+  last_user : Integer
+  och_type_by_default : Integer
+  para_type : String
+}
+
+entity "queue_logs" {
+  * id : Integer <<PK>>
+  --
+  user_id : BigInteger <<FK>>
+  discipline_id : Integer <<FK>>
+  action : String
+  created_time : DateTime
+}
+
+entity "change_places" {
+  * id : Integer <<PK>>
+  --
+  user_id_s : BigInteger <<FK>>
+  user_id_r : BigInteger <<FK>>
+  discipline_id : Integer <<FK>>
+  status : Integer
+  message_id : Integer
+}
+
+groups ||--o{ users : "group"
+groups ||--o{ disciplines : "group"
+groups ||--o{ last_users : "group"
+users ||--o{ user_discipline : "user_id"
+disciplines ||--o{ user_discipline : "discipline_id"
+disciplines ||--o{ queue_logs : "discipline_id"
+users ||--o{ queue_logs : "user_id"
+last_users ||--o{ disciplines : "last_user_id"
+users ||--o{ change_places : "user_id_s"
+users ||--o{ change_places : "user_id_r"
+disciplines ||--o{ change_places : "discipline_id"
+@enduml

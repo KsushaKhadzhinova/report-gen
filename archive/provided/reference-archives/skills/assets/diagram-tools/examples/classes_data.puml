@@ -1,0 +1,108 @@
+@startuml
+' Диаграмма классов сущностей данных. Без пакетов, имена -- как в коде.
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam nodesep 30
+skinparam ranksep 45
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam class {
+  BackgroundColor white
+  BorderColor black
+  BorderThickness 1.5
+  ArrowColor black
+  FontStyle plain
+  FontName Arial
+  AttributeFontStyle plain
+  AttributeFontName Arial
+}
+hide empty methods
+hide circle
+top to bottom direction
+
+class User {
+  telegram_id
+  username
+  language
+  is_active
+  notification_enabled
+  email
+  email_verified
+  email_notifications
+}
+
+class TrackedProduct {
+  user_id
+  name
+  category
+  min_price_byn
+  max_price_byn
+  search_keywords
+  exclude_keywords
+  kufar_filters
+  min_deal_score
+  is_active
+}
+
+class Listing {
+  platform
+  external_id
+  title
+  description
+  price_byn
+  url
+  location
+  posted_at
+  first_seen_at
+  last_seen_at
+}
+
+class Match {
+  tracked_product_id
+  listing_id
+  deal_score
+  match_details
+  notified_at
+  notify_attempts
+  notify_error
+  user_reaction
+}
+
+class SentNotification {
+  user_id
+  tracked_product_id
+  listing_id
+  listing_external_id
+  platform
+  price_byn
+  sent_at
+}
+
+class KufarAttribute {
+  category_id
+  p
+  pu
+  label
+  seen_count
+}
+
+class KufarAttributeValue {
+  attribute_id
+  value_code
+  value_label
+  parent_code
+  seen_count
+}
+
+User "1" *-- "0..*" TrackedProduct
+TrackedProduct "1" *-- "0..*" Match
+Listing "1" *-- "0..*" Match
+Match "1" o-- "0..1" SentNotification
+KufarAttribute "1" *-- "0..*" KufarAttributeValue
+
+User -[hidden]right- KufarAttribute
+TrackedProduct -[hidden]right- KufarAttributeValue
+Listing -[hidden]right- Match
+@enduml

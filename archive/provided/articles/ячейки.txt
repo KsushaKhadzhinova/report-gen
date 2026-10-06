@@ -1,0 +1,1093 @@
+ЯЧЕЙКА 4.0: Заголовок и предпосылки
+# -----------------------------------
+# В этой ячейке реализуется:
+#   - алгоритм кратчайшего пополняющего пути (Shortest Augmenting Path, SAP)
+#     для задачи линейного задания (ЛЗН);
+#   - хранение базисного плана (оптимального назначения) в виде множества дуг;
+#   - хранение пополняющих циклов для небазисных дуг и знаков дуг в этих циклах,
+#     необходимых для аналитического расчёта интервалов устойчивости
+#     по разделу 6 статьи (ячейки 6.2–6.4).
+
+
+from math import inf
+from dataclasses import dataclass
+from typing import Any, Dict, List, Set, Tuple, Optional
+
+
+# Типы заданы в ячейке 2 и используются здесь и далее:
+# Agent = int
+# Task = int
+# Edge = Tuple[Agent, Task]
+# CostMatrix = Dict[Edge, float]
+# Assignment = Dict[Edge, int]
+# StabilityIntervals = Dict[Edge, Tuple[float, float]] # ЯЧЕЙКА 4.1: Структура состояния SAP (SAPState)
+# ----------------------------------------------
+# Полное состояние SAP, достаточное для:
+#   - восстановления базисного плана X^(t),
+#   - анализа пополняющих путей и циклов,
+#   - аналитического расчёта интервалов устойчивости (раздел 6).
+
+
+@dataclass
+class SAPState:
+    # --- Потенциалы (двойственные переменные) ---
+    u: Dict[Agent, float]                     # потенциалы строк u_i^(t)
+    v: Dict[Task, float]                      # потенциалы столбцов v_j^(t)
+
+
+    # --- Текущее паросочетание в индексах матрицы ---
+    match_row: Dict[Agent, int]              # i -> j_idx (назначенный столбец или -1)
+    match_col: Dict[Task, int]               # j -> i_idx (назначенная строка или -1)
+
+
+    # --- Отображения индексов в реальные идентификаторы ---
+    agent_index: Dict[int, Agent]            # i_idx -> i
+    task_index: Dict[int, Task]              # j_idx -> j
+
+
+    # --- Последний запуск поиска пополняющего пути SAP ---
+    parent: Dict[int, int]                   # j_idx -> parent j_idx
+    last_dist: Dict[int, float]              # j_idx -> dist
+
+
+    # --- История всех запусков SAP (для восстановления путей/циклов) ---
+    # Каждый элемент history[k] имеет структуру:
+    # {
+    #   "free_agent_idx": int,
+    #   "augment_path_idx": List[Tuple[int,int]],   # путь в индексах (i_idx,j_idx)
+    #   "dist": Dict[int, float],                   # dist[j_idx] на итерации
+    #   "parent": Dict[int, int],                   # parent[j_idx] на итерации
+    #   "match_row_snapshot": Dict[Agent, int],     # снимок match_row
+    #   "match_col_snapshot": Dict[Task, int],      # снимок match_col
+    # }
+    history: List[Dict[str, Any]]
+
+
+    # --- Структура для аналитики устойчивости (раздел 6) ---
+
+
+    basis_edges: Set[Edge]                   # базисные дуги (x_ij = 1) текущего оптимального плана
+
+
+    # Для каждой небазисной дуги e = (i,j):
+    #   entering_cycles[e] = список дуг цикла C(e), возникающего при включении e
+    entering_cycles: Dict[Edge, List[Edge]]
+
+
+    # Для каждой небазисной дуги e и для каждой дуги (p,q) в её цикле C(e):
+    #   sign_on_cycle[e][(p,q)] = σ_{pq} ∈ {+1, -1}
+    # Знаки используются в аналитических формулах для интервалов устойчивости.
+    sign_on_cycle: Dict[Edge, Dict[Edge, int]] # ЯЧЕЙКА 4.2: Построение плотной матрицы стоимостей для SAP
+# ---------------------------------------------------------
+# Цель: связать словарное представление C (на дугах E ⊆ A×B)
+# с индексной формой cost[i_idx][j_idx], используемой в SAP.
+
+
+def build_dense_cost_matrix(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix,
+    big_M: float = 1e6
+) -> Tuple[List[List[float]], Dict[int, Agent], Dict[int, Task]]:
+    """
+    Строит плотную матрицу стоимостей для SAP:
+
+
+      - A, B — списки агентов и задач (A^(t), B^(t)),
+      - C — словарь стоимостей c_ij^(t) на дугах E^(t) ⊆ A^(t) × B^(t),
+      - отсутствующие дуги моделируются большой стоимостью big_M.
+
+
+    Требование:
+      cost[i_idx][j_idx] = c_ij, если (i,j) ∈ C,
+                           big_M, если дуга (i,j) отсутствует.
+
+
+    Возвращает:
+      - cost: матрица размера m × n (m = |A|, n = |B|),
+      - agent_index: отображение i_idx -> i,
+      - task_index:  отображение j_idx -> j.
+    """
+    # Для воспроизводимости порядка индексов упорядочим A и B
+    A_sorted = sorted(A)
+    B_sorted = sorted(B)
+
+
+    m = len(A_sorted)
+    n = len(B_sorted)
+
+
+    # Инициализируем cost большой константой (как отсутствие дуги)
+    cost: List[List[float]] = [[big_M for _ in range(n)] for _ in range(m)]
+
+
+    # Заполняем реальные стоимости, где дуга (i,j) существует
+    for i_idx, i in enumerate(A_sorted):
+        for j_idx, j in enumerate(B_sorted):
+            if (i, j) in C:
+                cost[i_idx][j_idx] = C[(i, j)]
+
+
+    # Отображения индексов в реальные идентификаторы
+    agent_index: Dict[int, Agent] = {i_idx: i for i_idx, i in enumerate(A_sorted)}
+    task_index: Dict[int, Task] = {j_idx: j for j_idx, j in enumerate(B_sorted)}
+
+
+    return cost, agent_index, task_index # ЯЧЕЙКА 4.3: Алгоритм SAP (кратчайший пополняющий путь) и базисный план
+# -----------------------------------------------------------------------
+# Здесь реализуется сам SAP-алгоритм для ЛЗН и формируется:
+#   - оптимальное назначение X^(t),
+#   - потенциалы u, v,
+#   - базисные дуги basis_edges,
+#   - история SAP (history), необходимая для аналитики в разделах 6.2–6.4.
+
+
+def sap_assignment(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix
+) -> Tuple[Assignment, SAPState]:
+    """
+    Реализация алгоритма кратчайшего пополняющего пути (SAP)
+    для задачи линейного назначения (ЛЗН) на шаге t.
+
+
+    Вход:
+      - A, B: множества агентов и задач A^(t), B^(t),
+      - C: словарь стоимостей c_ij^(t) на дугах E^(t) ⊆ A^(t) × B^(t).
+
+
+    Выход:
+      - X: оптимальное назначение X^(t) как словарь (i,j) -> {0,1},
+      - state: SAPState с:
+          * потенциалами u, v,
+          * финальным паросочетанием match_row, match_col,
+          * историей SAP (history),
+          * множеством базисных дуг basis_edges.
+    """
+    # Строим плотную матрицу стоимостей и индексацию
+    cost, agent_index, task_index = build_dense_cost_matrix(A, B, C)
+    m = len(agent_index)   # число агентов
+    n = len(task_index)    # число задач
+
+
+    # --- Инициализация потенциалов и паросочетания ---
+    u: Dict[Agent, float] = {agent_index[i]: 0.0 for i in range(m)}
+    v: Dict[Task, float] = {task_index[j]: 0.0 for j in range(n)}
+
+
+    # match_row[i] = j_idx (индекс назначенной задачи) или -1
+    match_row: Dict[Agent, int] = {agent_index[i]: -1 for i in range(m)}
+    # match_col[j] = i_idx (индекс назначенного агента) или -1
+    match_col: Dict[Task, int] = {task_index[j]: -1 for j in range(n)}
+
+
+    # История шагов SAP (для последующего восстановления циклов)
+    history: List[Dict[str, Any]] = []
+
+
+    # Последние parent/dist для SAPState (не обязательно, но удобно)
+    last_parent: Dict[int, int] = {}
+    last_dist: Dict[int, float] = {}
+
+
+    # --- Основной цикл SAP: по каждому агенту ищем пополняющий путь ---
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+
+
+        # Инициализация расстояний, предков и используемых столбцов
+        dist: List[float] = [inf] * n
+        parent: List[int] = [-1] * n
+        used: List[bool] = [False] * n
+
+
+        # Начальные редуцированные стоимости
+        for j_idx in range(n):
+            j = task_index[j_idx]
+            dist[j_idx] = cost[i_idx][j_idx] - u[i] - v[j]
+            parent[j_idx] = -1
+
+
+        # Поиск кратчайшего пополняющего пути от агента i к свободной задаче
+        while True:
+            j_min = -1
+            d_min = inf
+            for j_idx in range(n):
+                if not used[j_idx] and dist[j_idx] < d_min:
+                    d_min = dist[j_idx]
+                    j_min = j_idx
+
+
+            used[j_min] = True
+            j = task_index[j_min]
+
+
+            # Если задача j ещё свободна, пополняющий путь найден
+            if match_col[j] == -1:
+                # Сохраняем состояния dist/parent перед корректировкой потенциалов
+                dist_snapshot = {jj: dist[jj] for jj in range(n)}
+                parent_snapshot = {jj: parent[jj] for jj in range(n)}
+
+
+                # Обновление потенциалов (u,v) по стандартной схеме SAP
+                for jj in range(n):
+                    j_node = task_index[jj]
+                    if used[jj]:
+                        v[j_node] += dist[jj] - d_min
+                        i_used_idx = match_col[j_node]
+                        if i_used_idx != -1:
+                            i_used = agent_index[i_used_idx]
+                            u[i_used] -= dist[jj] - d_min
+                    else:
+                        dist[jj] -= dist[j_min] - d_min
+                u[i] += d_min
+
+
+                # Восстанавливаем пополняющий путь и обновляем паросочетание
+                path_edges_idx: List[Tuple[int, int]] = []
+                cur_j = j_min
+                cur_i = i_idx
+                while True:
+                    prev_i = match_col[task_index[cur_j]]
+                    path_edges_idx.append((cur_i, cur_j))
+                    match_col[task_index[cur_j]] = cur_i
+                    match_row[agent_index[cur_i]] = cur_j
+                    if prev_i == -1:
+                        break
+                    cur_j = parent[cur_j]
+                    cur_i = prev_i
+
+
+                # Сохраняем кадр SAP-истории
+                history.append({
+                    "free_agent_idx": i_idx,
+                    "augment_path_idx": list(reversed(path_edges_idx)),
+                    "dist": dist_snapshot,
+                    "parent": parent_snapshot,
+                    "match_row_snapshot": match_row.copy(),
+                    "match_col_snapshot": match_col.copy()
+                })
+
+
+                # Обновляем last_parent/last_dist для SAPState
+                last_parent = parent_snapshot
+                last_dist = dist_snapshot
+
+
+                break
+
+
+            # Иначе задача j уже занята, продолжаем поиск:
+            # переходим к агенту i_next, назначенному задаче j
+            i_next_idx = match_col[j]       # индекс агента, связанного с j
+            i_next = agent_index[i_next_idx]
+
+
+            for j_idx2 in range(n):
+                if used[j_idx2]:
+                    continue
+                j2 = task_index[j_idx2]
+                # редуцированная стоимость (учёт потенциалов u,v)
+                new_dist = (dist[j_min] +
+                            cost[i_next_idx][j_idx2] -
+                            u[i_next] - v[j2])
+                if new_dist < dist[j_idx2]:
+                    dist[j_idx2] = new_dist
+                    parent[j_idx2] = j_min
+
+
+    # --- Формирование оптимального назначения X^(t) и базиса ---
+
+
+    # X: (i,j) -> {0,1} на множестве дуг C.keys()
+    X: Assignment = {e: 0 for e in C.keys()}
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+        j_idx = match_row[i]
+        if j_idx != -1:
+            j = task_index[j_idx]
+            if (i, j) in C:
+                X[(i, j)] = 1
+
+
+    # Множество базисных дуг (x_ij = 1)
+    basis_edges: Set[Edge] = {e for e, x in X.items() if x == 1}
+
+
+    # Создаём SAPState без циклов/знаков (они будут добавлены в следующей подъячейке)
+    state = SAPState(
+        u=u,
+        v=v,
+        match_row=match_row,
+        match_col=match_col,
+        agent_index=agent_index,
+        task_index=task_index,
+        parent=last_parent,
+        last_dist=last_dist,
+        history=history,
+        basis_edges=basis_edges,
+        entering_cycles={},   # будет заполнено позже
+        sign_on_cycle={}      # будет заполнено позже
+    )
+
+
+    return X, state # ЯЧЕЙКА 4.4: Циклы по SAP-истории (вспомогательные функции)
+# -----------------------------------------------------------
+# Здесь реализуются функции, которые по сохранённой истории SAP (history)
+# восстанавливают пополняющий путь и цикл для небазисной дуги edge.
+
+
+# 4.4.1. Вспомогательная функция: (i,j) -> (i_idx, j_idx)
+
+
+def edge_to_indices(
+    edge: Edge,
+    agent_index: Dict[int, Agent],
+    task_index: Dict[int, Task]
+) -> Optional[Tuple[int, int]]:
+    """
+    Возвращает индексы (i_idx, j_idx) для дуги edge = (i,j),
+    используя отображения agent_index[i_idx] -> i, task_index[j_idx] -> j.
+
+
+    Если i или j не найдены в индексации, возвращает None.
+    """
+    i, j = edge
+
+
+    # Строим обратные отображения: i -> i_idx, j -> j_idx
+    inv_agent_index: Dict[Agent, int] = {agent: idx for idx, agent in agent_index.items()}
+    inv_task_index: Dict[Task, int] = {task: idx for idx, task in task_index.items()}
+
+
+    if i not in inv_agent_index or j not in inv_task_index:
+        return None
+
+
+    return inv_agent_index[i], inv_task_index[j]
+
+
+
+# 4.4.2. Восстановление пути из parent/снимка
+
+
+def reconstruct_path_from_parent(
+    j_end_idx: int,
+    parent_snapshot: Dict[int, int],
+    match_col_snapshot: Dict[Task, int],
+    agent_index: Dict[int, Agent],
+    task_index: Dict[int, Task]
+) -> List[Edge]:
+    """
+    Восстанавливает пополняющий путь от свободного агента до задачи j_end_idx
+    по дереву parent_snapshot и структуре match_col_snapshot.
+
+
+    Выход:
+      - список дуг в терминах реальных вершин (i,j) в порядке от источника
+        (свободного агента) к задаче с индексом j_end_idx.
+
+
+    Логика (как в SAP):
+      - начинаем с j_end_idx и поднимаемся по parent_snapshot до корня,
+      - на каждом шаге используем match_col_snapshot, чтобы найти агента,
+        назначенного текущей задаче.
+    """
+    path_edges: List[Edge] = []
+
+
+    # Строим обратные отображения для задач: j -> j_idx
+    inv_task_index: Dict[Task, int] = {task: idx for idx, task in task_index.items()}
+
+
+    cur_j_idx = j_end_idx
+    while True:
+        j = task_index[cur_j_idx]               # реальный id задачи
+        # агент, назначенный этой задаче в данном снимке
+        i_idx = match_col_snapshot.get(j, -1)
+        if i_idx == -1:
+            # достигли свободного агента (источник пути), прекращаем
+            break
+        i = agent_index[i_idx]
+        path_edges.append((i, j))
+
+
+        # Переходим к родителю j по дереву поиска
+        parent_j_idx = parent_snapshot.get(cur_j_idx, -1)
+        if parent_j_idx == -1:
+            break
+        cur_j_idx = parent_j_idx
+
+
+    # Путь восстановлен от конца к началу, разворачиваем
+    path_edges.reverse()
+    return path_edges
+
+
+
+# 4.4.3. Восстановление цикла для небазисной дуги по SAP-истории
+
+
+def reconstruct_cycle_for_edge_via_history(
+    edge: Edge,
+    C: CostMatrix,
+    state: SAPState
+) -> Optional[List[Edge]]:
+    """
+    Находит пополняющий цикл для небазисной дуги edge = (i,j),
+    используя SAP-историю (state.history) и деревья parent_snapshot.
+
+
+    Идея:
+      - найти индексы (i_idx, j_idx) для edge;
+      - найти такой кадр history[k], в котором:
+          * структура parent_snapshot допускает путь от корня (свободного агента)
+            к j_idx или к задаче, "связанной" с edge;
+      - по parent_snapshot и match_col_snapshot восстановить пополняющий путь P;
+      - цикл получается как P + [edge].
+
+
+    Если подходящего кадра в history нет или путь не удаётся восстановить,
+    возвращается None (в аналитике для такой дуги цикл не используется).
+    """
+    # Переводим дугу edge в индексы (i_idx, j_idx)
+    idx_pair = edge_to_indices(edge, state.agent_index, state.task_index)
+    if idx_pair is None:
+        return None
+    i_idx_edge, j_idx_edge = idx_pair
+
+
+    # Обратные отображения для удобства
+    inv_agent_index: Dict[Agent, int] = {agent: idx for idx, agent in state.agent_index.items()}
+    inv_task_index: Dict[Task, int] = {task: idx for idx, task in state.task_index.items()}
+
+
+    i_edge, j_edge = edge
+
+
+    # Проходим по истории SAP с конца к началу (часто последний кадр ближе к нужной структуре)
+    for frame in reversed(state.history):
+        parent_snapshot: Dict[int, int] = frame["parent"]
+        match_col_snapshot: Dict[Task, int] = frame["match_col_snapshot"]
+
+
+        # Для данной истории задачей-целевым кандидатом берём j_edge,
+        # если она фигурирует в текущем parent_snapshot.
+        if j_edge not in inv_task_index:
+            continue
+        j_idx_candidate = inv_task_index[j_edge]
+
+
+        if j_idx_candidate not in parent_snapshot:
+            # В этом кадре задача j_edge не участвовала в поиске
+            continue
+
+
+        # Пытаемся восстановить путь P до j_idx_candidate
+        path_P = reconstruct_path_from_parent(
+            j_end_idx=j_idx_candidate,
+            parent_snapshot=parent_snapshot,
+            match_col_snapshot=match_col_snapshot,
+            agent_index=state.agent_index,
+            task_index=state.task_index
+        )
+
+
+        if not path_P:
+            # Путь не удалось восстановить
+            continue
+
+
+        # Цикл = восстановленный путь P + добавляемая дуга edge
+        cycle = path_P + [edge]
+        return cycle
+
+
+    # Если ни в одном кадре history не удалось построить путь, цикл не найден
+    return None # ЯЧЕЙКА 4.5: Знаки дуг в цикле C(edge)
+# -------------------------------------
+# Здесь реализуется присвоение знаков σ_{pq} ∈ {+1, -1} дугам цикла C(edge),
+# который используется в аналитических формулах интервалов устойчивости.
+
+
+def compute_cycle_signs(
+    edge: Edge,
+    cycle: List[Edge],
+    basis_edges: Set[Edge]
+) -> Dict[Edge, int]:
+    """
+    Возвращает словарь σ_e_cycle: (p,q) -> {+1,-1} для дуг цикла C(edge),
+    согласованный с теоретической схемой включения/исключения.
+
+
+    Требования:
+      - небазисная входящая дуга edge получает знак +1;
+      - базисные дуги, которые выталкиваются, получают знак -1;
+      - остальные дуги цикла получают знак так, чтобы сумма
+        ∑ σ_{pq} c_{pq} соответствовала выражению в теории.
+
+
+    Упрощённая (но обычно достаточная) схема:
+      - цикл задан в порядке обхода;
+      - присваиваем знаки чередованием (+1, -1, +1, -1, ...),
+        при этом принудительно ставим σ_edge = +1 и сдвигаем фазу
+        так, чтобы этот знак выполнялся.
+    """
+    signs: Dict[Edge, int] = {}
+
+
+    if not cycle or edge not in cycle:
+        # Если цикл пустой или edge в нём нет, возвращаем пустой набор
+        return signs
+
+
+    # Гарантируем, что edge стоит в конце списка (для удобства)
+    # Если edge встречается внутри, "ротацией" цикла переносим edge в конец.
+    if cycle[-1] != edge:
+        # Найдём индекс edge
+        idx = cycle.index(edge)
+        # Сдвигаем цикл так, чтобы edge оказался последним
+        cycle = cycle[idx+1:] + cycle[:idx+1]
+
+
+    k = len(cycle)
+    if k == 0:
+        return signs
+
+
+    # Теперь cycle[-1] == edge (входящая небазисная дуга)
+    # Присвоим ей знак +1
+    signs[cycle[-1]] = +1
+
+
+    # Для остальных дуг будем чередовать знаки, двигаясь назад по циклу
+    # так, чтобы соседние дуги имели противоположные знаки.
+    current_sign = -1  # перед edge будет -1
+    for e in reversed(cycle[:-1]):
+        signs[e] = current_sign
+        current_sign *= -1  # чередуем знак
+
+
+    return signs def check_cycle_validity(
+    edge: Edge,
+    cycle: List[Edge],
+    basis_edges: Set[Edge]
+) -> bool:
+    """
+    Проверяет:
+      - цикл замкнут по вершинам (соседние дуги согласованы),
+      - на цикле чередуются базисные и небазисные дуги,
+      - сама дуга edge присутствует в цикле.
+    """
+    # 1. Проверка наличия edge в cycle
+    if not cycle or edge not in cycle:
+        # Можно вывести предупреждение в тестовой части:
+        # print(f"[WARN] edge {edge} отсутствует в цикле {cycle}")
+        return False
+
+
+    k = len(cycle)
+    if k < 2:
+        # Цикл должен содержать как минимум 2 дуги
+        # print(f"[WARN] слишком короткий цикл: {cycle}")
+        return False
+
+
+    # 2. Проверка замкнутости по вершинам:
+    #    для последовательности [(i1,j1), (i2,j2), ...]:
+    #    каждая пара соседних дуг должна иметь общую вершину
+    for idx in range(k):
+        i1, j1 = cycle[idx]
+        i2, j2 = cycle[(idx + 1) % k]  # замыкаем цикл
+        # Общая вершина — либо общий агент, либо общая задача
+        if not (i1 == i2 or j1 == j2):
+            # print(f"[WARN] несогласованные дуги в цикле: {cycle[idx]} и {cycle[(idx+1)%k]}")
+            return False
+
+
+    # 3. Проверка чередования базисных и небазисных дуг
+    #    Требование: для любой соседней пары дуг is_basis XOR is_basis_next = True,
+    #    т.е. ровно одна из пары принадлежит basis_edges.
+    for idx in range(k):
+        e1 = cycle[idx]
+        e2 = cycle[(idx + 1) % k]
+        is_basis_1 = e1 in basis_edges
+        is_basis_2 = e2 in basis_edges
+
+
+        # XOR: истина, если ровно один из is_basis_* истинен
+        if (is_basis_1 and is_basis_2) or (not is_basis_1 and not is_basis_2):
+            # print(f"[WARN] нет чередования базис/небазис между {e1} и {e2}")
+            return False
+
+
+    return True # ЯЧЕЙКА 4.7: Обновлённый sap_assignment с циклами и знаками
+# ---------------------------------------------------------
+
+
+
+def sap_assignment(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix
+) -> Tuple[Assignment, SAPState]:
+    """
+    Реализация алгоритма кратчайшего пополняющего пути (SAP)
+    для задачи линейного назначения (ЛЗН) с формированием:
+
+
+      - оптимального назначения X,
+      - потенциалов u, v,
+      - базисных дуг basis_edges,
+      - истории SAP (history),
+      - пополняющих циклов для всех небазисных дуг,
+      - знаков дуг на циклах (sign_on_cycle).
+    """
+    # ---------- 1. Построение плотной матрицы и индексов ----------
+    cost, agent_index, task_index = build_dense_cost_matrix(A, B, C)
+    m = len(agent_index)
+    n = len(task_index)
+
+
+    # ---------- 2. Инициализация потенциалов и паросочетания ----------
+    u: Dict[Agent, float] = {agent_index[i]: 0.0 for i in range(m)}
+    v: Dict[Task, float] = {task_index[j]: 0.0 for j in range(n)}
+
+
+    match_row: Dict[Agent, int] = {agent_index[i]: -1 for i in range(m)}
+    match_col: Dict[Task, int] = {task_index[j]: -1 for j in range(n)}
+
+
+    history: List[Dict[str, Any]] = []
+    last_parent: Dict[int, int] = {}
+    last_dist: Dict[int, float] = {}
+
+
+    # ---------- 3. Основной цикл SAP по агентам ----------
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+
+
+        dist: List[float] = [inf] * n
+        parent: List[int] = [-1] * n
+        used: List[bool] = [False] * n
+
+
+        # начальные редуцированные стоимости
+        for j_idx in range(n):
+            j = task_index[j_idx]
+            dist[j_idx] = cost[i_idx][j_idx] - u[i] - v[j]
+            parent[j_idx] = -1
+
+
+        while True:
+            j_min = -1
+            d_min = inf
+            for j_idx in range(n):
+                if not used[j_idx] and dist[j_idx] < d_min:
+                    d_min = dist[j_idx]
+                    j_min = j_idx
+
+
+            used[j_min] = True
+            j = task_index[j_min]
+
+
+            # если задача j свободна — найден пополняющий путь
+            if match_col[j] == -1:
+                # снимки dist/parent до коррекции потенциалов
+                dist_snapshot = {jj: dist[jj] for jj in range(n)}
+                parent_snapshot = {jj: parent[jj] for jj in range(n)}
+
+
+                # корректировка потенциалов u, v
+                for jj in range(n):
+                    j_node = task_index[jj]
+                    if used[jj]:
+                        v[j_node] += dist[jj] - d_min
+                        i_used_idx = match_col[j_node]
+                        if i_used_idx != -1:
+                            i_used = agent_index[i_used_idx]
+                            u[i_used] -= dist[jj] - d_min
+                    else:
+                        dist[jj] -= dist[j_min] - d_min
+                u[i] += d_min
+
+
+                # восстановление пополняющего пути и обновление паросочетания
+                path_edges_idx: List[Tuple[int, int]] = []
+                cur_j = j_min
+                cur_i = i_idx
+                while True:
+                    prev_i = match_col[task_index[cur_j]]
+                    path_edges_idx.append((cur_i, cur_j))
+                    match_col[task_index[cur_j]] = cur_i
+                    match_row[agent_index[cur_i]] = cur_j
+                    if prev_i == -1:
+                        break
+                    cur_j = parent[cur_j]
+                    cur_i = prev_i
+
+
+                # кадр истории SAP
+                history.append({
+                    "free_agent_idx": i_idx,
+                    "augment_path_idx": list(reversed(path_edges_idx)),
+                    "dist": dist_snapshot,
+                    "parent": parent_snapshot,
+                    "match_row_snapshot": match_row.copy(),
+                    "match_col_snapshot": match_col.copy()
+                })
+
+
+                last_parent = parent_snapshot
+                last_dist = dist_snapshot
+
+
+                break
+
+
+            # иначе задача j уже занята — продолжаем поиск
+            i_next_idx = match_col[j]
+            i_next = agent_index[i_next_idx]
+
+
+            for j_idx2 in range(n):
+                if used[j_idx2]:
+                    continue
+                j2 = task_index[j_idx2]
+                new_dist = (dist[j_min] +
+                            cost[i_next_idx][j_idx2] -
+                            u[i_next] - v[j2])
+                if new_dist < dist[j_idx2]:
+                    dist[j_idx2] = new_dist
+                    parent[j_idx2] = j_min
+
+
+    # ---------- 4. Формирование оптимального назначения X и базиса ----------
+    X: Assignment = {e: 0 for e in C.keys()}
+    for i_idx in range(m):
+        i = agent_index[i_idx]
+        j_idx = match_row[i]
+        if j_idx != -1:
+            j = task_index[j_idx]
+            if (i, j) in C:
+                X[(i, j)] = 1
+
+
+    basis_edges: Set[Edge] = {e for e, x in X.items() if x == 1}
+
+
+    # ---------- 5. Начальный SAPState (без циклов и знаков) ----------
+    state = SAPState(
+        u=u,
+        v=v,
+        match_row=match_row,
+        match_col=match_col,
+        agent_index=agent_index,
+        task_index=task_index,
+        parent=last_parent,
+        last_dist=last_dist,
+        history=history,
+        basis_edges=basis_edges,
+        entering_cycles={},     # будет заполнено ниже
+        sign_on_cycle={}        # будет заполнено ниже
+    )
+
+
+    # ---------- 6. Восстановление циклов для небазисных дуг ----------
+    entering_cycles: Dict[Edge, List[Edge]] = {}
+    sign_on_cycle: Dict[Edge, Dict[Edge, int]] = {}
+
+
+    for e in C.keys():
+        if X[e] == 1:
+            continue  # только небазисные дуги
+
+
+        cycle = reconstruct_cycle_for_edge_via_history(e, C, state)
+        if cycle is None:
+            continue
+
+
+        entering_cycles[e] = cycle
+        sign_on_cycle[e] = compute_cycle_signs(e, cycle, basis_edges)
+
+
+    # ---------- 7. Проверка валидности циклов ----------
+    for e, cyc in entering_cycles.items():
+        valid = check_cycle_validity(e, cyc, basis_edges)
+        if not valid:
+            # В отладочном режиме можно выбрасывать исключение или печатать предупреждение:
+            # raise RuntimeError(f"Невалидный цикл для дуги {e}: {cyc}")
+            # Здесь ограничимся возможным print в тестовой части.
+            pass
+
+
+    # ---------- 8. Финальный SAPState с циклами и знаками ----------
+    state = SAPState(
+        u=u,
+        v=v,
+        match_row=match_row,
+        match_col=match_col,
+        agent_index=agent_index,
+        task_index=task_index,
+        parent=last_parent,
+        last_dist=last_dist,
+        history=history,
+        basis_edges=basis_edges,
+        entering_cycles=entering_cycles,
+        sign_on_cycle=sign_on_cycle
+    )
+
+
+    return X, state # ЯЧЕЙКА 4.8: Обёртка solve_assignment_base
+# ----------------------------------------
+
+
+
+def solve_assignment_base(
+    A: List[Agent],
+    B: List[Task],
+    C: CostMatrix
+) -> Tuple[Assignment, Dict[Agent, float], Dict[Task, float], SAPState]:
+    """
+    Базовая точка входа для решения задачи назначения.
+
+
+    Возвращает:
+      - X: оптимальное назначение;
+      - u: потенциалы по агентам;
+      - v: потенциалы по задачам;
+      - state: полный SAPState, содержащий:
+          * basis_edges,
+          * entering_cycles,
+          * sign_on_cycle,
+          * историю SAP и прочие служебные структуры.
+    """
+    X, state = sap_assignment(A, B, C)
+    return X, state.u, state.v, state # ЯЧЕЙКА 4.9: Тест и демонстрация структуры SAPState
+# ---------------------------------------------------
+
+
+def print_assignment_test():
+    # 1. Маленький пример 4x4
+    A: List[Agent] = [0, 1, 2, 3]
+    B: List[Task] = [0, 1, 2, 3]
+
+
+    # Стоимостная матрица C в виде словаря (i,j) -> c_ij
+    C: CostMatrix = {
+        (0, 0): 9,  (0, 1): 2,  (0, 2): 7,  (0, 3): 8,
+        (1, 0): 6,  (1, 1): 4,  (1, 2): 3,  (1, 3): 7,
+        (2, 0): 5,  (2, 1): 8,  (2, 2): 1,  (2, 3): 8,
+        (3, 0): 7,  (3, 1): 6,  (3, 2): 9,  (3, 3): 4,
+    }
+
+
+    print("Cost matrix C (4x4):")
+    for i in A:
+        row = [C[(i, j)] for j in B]
+        print(f"Row {i}: {row}")
+    print()
+
+
+    # 2. Решение задачи
+    X, u, v, sap_state = solve_assignment_base(A, B, C)
+
+
+    # 3. Вывод оптимального назначения и значения цели
+    print("Optimal assignment X (edges with x=1):")
+    objective_value = 0.0
+    for (i, j), x_ij in X.items():
+        if x_ij == 1:
+            cost_ij = C[(i, j)]
+            objective_value += cost_ij
+            print(f"  x[{i},{j}] = 1  (cost = {cost_ij})")
+    print(f"Objective value: {objective_value}")
+    print()
+
+
+    # 4. Потенциалы u, v
+    print("Potentials u (agents):")
+    for i in A:
+        print(f"  u[{i}] = {u[i]}")
+    print()
+
+
+    print("Potentials v (tasks):")
+    for j in B:
+        print(f"  v[{j}] = {v[j]}")
+    print()
+
+
+    # 5. Редуцированные стоимости δ_ij = c_ij - u_i - v_j
+    print("Reduced costs δ_ij = c_ij - u_i - v_j:")
+    for i in A:
+        row_rc = []
+        for j in B:
+            delta_ij = C[(i, j)] - u[i] - v[j]
+            row_rc.append(delta_ij)
+        print(f"  δ row for agent {i}: {row_rc}")
+    print()
+
+
+    # 6. Циклы и знаки для всех небазисных дуг
+    basis_edges = sap_state.basis_edges
+    print("Basis edges (x_ij = 1):", basis_edges)
+    print()
+
+
+    print("Entering cycles and signs for non-basis edges:")
+    for e in C.keys():
+        if X[e] == 1:
+            continue  # только небазисные дуги
+
+
+        cycle = sap_state.entering_cycles.get(e)
+        signs = sap_state.sign_on_cycle.get(e)
+
+
+        print(f"Edge e = {e}:")
+        if cycle is None or signs is None:
+            print("  No cycle found for this edge (cycle = None).")
+            print()
+            continue
+
+
+        # длина цикла
+        print(f"  Cycle length: {len(cycle)}")
+
+
+        # список дуг и их σ
+        print("  Cycle edges with sigma:")
+        for (i, j) in cycle:
+            sigma_ij = signs.get((i, j), 0)
+            print(f"    ({i},{j}), sigma = {sigma_ij}")
+
+
+        # проверка валидности цикла
+        valid = check_cycle_validity(e, cycle, basis_edges)
+        print(f"  Cycle validity for edge {e}: {valid}")
+        print()
+
+
+# Запуск теста
+print_assignment_test() Cost matrix C (4x4):
+Row 0: [9, 2, 7, 8]
+Row 1: [6, 4, 3, 7]
+Row 2: [5, 8, 1, 8]
+Row 3: [7, 6, 9, 4]
+
+Optimal assignment X (edges with x=1):
+  x[0,1] = 1  (cost = 2)
+  x[1,2] = 1  (cost = 3)
+  x[2,0] = 1  (cost = 5)
+  x[3,3] = 1  (cost = 4)
+Objective value: 14.0
+
+Potentials u (agents):
+  u[0] = 4.0
+  u[1] = 6.0
+  u[2] = 4.0
+  u[3] = 4.0
+
+Potentials v (tasks):
+  v[0] = 0.0
+  v[1] = -2.0
+  v[2] = -3.0
+  v[3] = 0.0
+
+Reduced costs δ_ij = c_ij - u_i - v_j:
+  δ row for agent 0: [5.0, 0.0, 6.0, 4.0]
+  δ row for agent 1: [0.0, 0.0, 0.0, 1.0]
+  δ row for agent 2: [1.0, 6.0, 0.0, 4.0]
+  δ row for agent 3: [3.0, 4.0, 8.0, 0.0]
+
+Basis edges (x_ij = 1): {(0, 1), (1, 2), (2, 0), (3, 3)}
+
+Entering cycles and signs for non-basis edges:
+Edge e = (0, 0):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (2,0), sigma = -1
+    (0,0), sigma = 1
+  Cycle validity for edge (0, 0): True
+
+Edge e = (0, 2):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (1,2), sigma = -1
+    (0,2), sigma = 1
+  Cycle validity for edge (0, 2): True
+
+Edge e = (0, 3):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (3,3), sigma = -1
+    (0,3), sigma = 1
+  Cycle validity for edge (0, 3): True
+
+Edge e = (1, 0):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (2,0), sigma = -1
+    (1,0), sigma = 1
+  Cycle validity for edge (1, 0): True
+
+Edge e = (1, 1):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (0,1), sigma = -1
+    (1,1), sigma = 1
+  Cycle validity for edge (1, 1): True
+
+Edge e = (1, 3):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (3,3), sigma = -1
+    (1,3), sigma = 1
+  Cycle validity for edge (1, 3): True
+
+Edge e = (2, 1):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (0,1), sigma = -1
+    (2,1), sigma = 1
+  Cycle validity for edge (2, 1): True
+
+Edge e = (2, 2):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (1,2), sigma = -1
+    (2,2), sigma = 1
+  Cycle validity for edge (2, 2): True
+
+Edge e = (2, 3):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (3,3), sigma = -1
+    (2,3), sigma = 1
+  Cycle validity for edge (2, 3): True
+
+Edge e = (3, 0):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (2,0), sigma = -1
+    (3,0), sigma = 1
+  Cycle validity for edge (3, 0): True
+
+Edge e = (3, 1):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (0,1), sigma = -1
+    (3,1), sigma = 1
+  Cycle validity for edge (3, 1): True
+
+Edge e = (3, 2):
+  Cycle length: 2
+  Cycle edges with sigma:
+    (1,2), sigma = -1
+    (3,2), sigma = 1
+  Cycle validity for edge (3, 2): True

@@ -1,0 +1,228 @@
+@startuml
+' Диаграмма классов серверного сервиса.
+' Без группировки по пакетам; имена классов, полей и методов -- как в коде.
+skinparam defaultFontName Arial
+skinparam defaultFontSize 15
+skinparam nodesep 30
+skinparam ranksep 45
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+skinparam class {
+  BackgroundColor white
+  BorderColor black
+  BorderThickness 1.5
+  ArrowColor black
+  FontStyle plain
+  FontName Arial
+  AttributeFontStyle plain
+  AttributeFontName Arial
+  StereotypeFontStyle plain
+}
+skinparam stereotypeCBackgroundColor white
+hide empty members
+hide circle
+top to bottom direction
+
+class jobs <<module>> {
+  + scrape_and_match_job(bot)
+  + deliver_notifications_job(bot)
+  + deliver_email_copies_job()
+  + cleanup_old_data_job()
+  + refresh_kufar_schema_job()
+}
+
+class BaseScraper <<abstract>> {
+  # _rate_limit()
+  # _get(url, params)
+  + close()
+  + platform()
+  + search(query, category, max_price, limit, attrs)
+  + fetch_listing(external_id)
+}
+
+class KufarScraper {
+  + platform()
+  + search(query, category, max_price, limit, attrs)
+  + search_iter(query, category, max_price, pages)
+  + fetch_listing(external_id)
+  - _build_params(query, category, max_price, limit, attrs)
+  - _parse_search_response(data, skip_company)
+  - _parse_ad(ad, skip_company)
+}
+
+class CategoryStrategy {
+  kufar_cat_id
+  deal_type
+  base_filters
+  attribute_order
+  range_filters
+  name_required
+  --
+  is_deep()
+  range_filter(pu)
+}
+
+class ScrapedListing {
+  platform
+  external_id
+  title
+  price_byn
+  url
+  posted_at
+  raw_data
+}
+
+class engine <<module>> {
+  + persist_listing(scraped)
+  + match_listings_for_product(product, scraped_listings)
+  - _discount_vs_threshold(price, threshold)
+  - _requeue(match)
+}
+
+class MatchEvent {
+  match
+  listing
+  kind
+  old_price
+}
+
+class sender <<module>> {
+  + send_deal_notification(bot, event, product, user)
+  + dispatch_new_matches(bot, events, product)
+  + pending_matches(limit)
+  + deliver_pending(bot, limit)
+  + give_up_on_stale()
+  - _min_sent_price(user_id, listing_external_id, platform_value)
+  - _mark_duplicate(match)
+}
+
+class limits <<module>> {
+  + is_admin(user)
+  + limit_for(user)
+  + count_for_user(user)
+  + count_total()
+  + check_can_add(user)
+}
+
+class LimitStatus {
+  allowed
+  reason
+  used
+  limit
+  total_used
+  total_limit
+}
+
+class User {
+  telegram_id
+  username
+  language
+  is_active
+  notification_enabled
+  email
+  email_verified
+  email_notifications
+}
+
+class TrackedProduct {
+  user_id
+  name
+  category
+  min_price_byn
+  max_price_byn
+  search_keywords
+  exclude_keywords
+  kufar_filters
+  min_deal_score
+  is_active
+  --
+  display_name()
+}
+
+class Listing {
+  platform
+  external_id
+  title
+  description
+  price_byn
+  url
+  location
+  posted_at
+  first_seen_at
+  last_seen_at
+}
+
+class Match {
+  tracked_product_id
+  listing_id
+  deal_score
+  match_details
+  notified_at
+  notify_attempts
+  notify_error
+  user_reaction
+}
+
+class SentNotification {
+  user_id
+  tracked_product_id
+  listing_id
+  listing_external_id
+  platform
+  price_byn
+  sent_at
+}
+
+class KufarAttribute {
+  category_id
+  p
+  pu
+  label
+  seen_count
+}
+
+class KufarAttributeValue {
+  attribute_id
+  value_code
+  value_label
+  parent_code
+  seen_count
+}
+
+' --- связи сущностей данных ---
+User "1" *-- "0..*" TrackedProduct
+TrackedProduct "1" *-- "0..*" Match
+Listing "1" *-- "0..*" Match
+Match "1" o-- "0..1" SentNotification
+KufarAttribute "1" *-- "0..*" KufarAttributeValue
+
+' --- связи модулей ---
+BaseScraper <|-- KufarScraper
+jobs ..> KufarScraper : опрашивает
+jobs ..> engine : вызывает
+jobs ..> sender : вызывает
+KufarScraper ..> CategoryStrategy : читает
+KufarScraper ..> ScrapedListing : создаёт
+KufarScraper ..> KufarAttribute : обновляет
+engine ..> ScrapedListing : принимает
+engine ..> Listing : сохраняет
+engine ..> MatchEvent : возвращает
+engine ..> Match : создаёт
+sender ..> MatchEvent : доставляет
+sender ..> SentNotification : записывает
+limits ..> LimitStatus : возвращает
+limits ..> TrackedProduct : считает
+
+' --- вертикальная компоновка ---
+jobs -[hidden]down- BaseScraper
+BaseScraper -[hidden]down- KufarScraper
+KufarScraper -[hidden]down- engine
+engine -[hidden]down- sender
+CategoryStrategy -[hidden]down- ScrapedListing
+ScrapedListing -[hidden]down- MatchEvent
+MatchEvent -[hidden]down- LimitStatus
+User -[hidden]right- sender
+Listing -[hidden]right- limits
+@enduml

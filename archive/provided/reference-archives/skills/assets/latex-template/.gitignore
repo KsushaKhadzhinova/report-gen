@@ -1,0 +1,35 @@
+# Локальные настройки агентов/IDE
+.claude/
+.idea/
+cmake-build-debug/
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.out
+*.toc
+*.synctex.gz
+*.bbl
+*.blg
+*.bcf
+*.run.xml
+*.nav
+*.snm
+*.vrb
+*.lof
+*.lot
+*.idx
+*.ilg
+*.ind
+
+# AI-ассистенты (Gemini CLI, Claude Code и пр.) -- не пушим артефакты/креды
+.gemini/
+.claude/
+.cursor/
+.aider*
+
+# Python
+__pycache__/
+*.pyc

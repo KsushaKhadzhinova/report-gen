@@ -1,0 +1,37 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 17
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam sequenceMessageAlign left
+skinparam sequence {
+  ParticipantBackgroundColor #DCE9F7
+  ParticipantBorderColor #2C5F8D
+  LifeLineBorderColor #888888
+  ArrowColor #333333
+}
+autonumber
+
+participant "Задача доставки" as D
+database "PostgreSQL" as DB
+participant "Telegram Bot API" as T
+actor "Пользователь" as U
+
+D -> DB : выбрать недоставленные совпадения
+DB --> D : совпадения с объявлениями
+D -> DB : проверить лимиты и прежние отправки
+
+alt лимит не исчерпан и цена ниже прежней
+  D -> T : уведомление с фотографиями
+  alt сообщение принято
+    T -> U : уведомление
+    D -> DB : отметить доставку и записать в журнал
+  else ошибка отправки
+    D -> DB : увеличить число попыток
+  end
+else объявление уже отправлялось
+  D -> DB : закрыть совпадение как дубликат
+end
+
+D -> DB : зафиксировать транзакцию
+@enduml

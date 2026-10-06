@@ -1,0 +1,37 @@
+\input{preamble}
+
+\input{macros}
+
+\begin{document}
+
+	% Титульный лист и ЗАДАНИЕ. Два варианта, нужен один:
+	% 1) набрать в LaTeX: заполните title.tex и task.tex (включено сейчас);
+	% 2) вставить готовые страницы из PDF: закомментируйте два \input ниже и
+	%    раскомментируйте \includepdf. Файл должен лежать внутри папки note/
+	%    (в контейнер сборки монтируется только она). Счётчик страниц после
+	%    вставки равен четырём, поэтому СОДЕРЖАНИЕ остаётся четвёртой страницей.
+	% \includepdf[pages=1-3,pagecommand={\thispagestyle{empty}}]{attachments/title_task.pdf}
+
+	\input{title}
+
+	\input{task}
+
+	\input{table_of_contents}
+
+	\input{sections/00_introduction}
+
+	\input{sections/01_analysis}
+
+	\input{sections/02_design}
+
+	\input{sections/03_development}
+
+	\input{sections/04_manual}
+
+	\input{sections/0A_conclusion}
+
+	\input{sections/0B_references}
+
+	\input{sections/0C_appendices}
+
+\end{document}

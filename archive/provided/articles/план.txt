@@ -1,0 +1,1230 @@
+### Часть I. Теория, постановка и базовые алгоритмы
+
+Ниже первая часть плана статьи/ноутбука, подробно разбитая на логические блоки и ячейки. Эта часть отвечает за формальную постановку динамической задачи, стохастическую модель, интервалы устойчивости и классические алгоритмы решения ЛЗН.[172]
+
+***
+
+## Блок 1. Введение, постановка и функционал
+
+### Ячейка 1. Текстовое введение и цели работы
+
+Содержимое (markdown / текст):
+
+- Краткое повторение ключевых пунктов введения:[172]
+  - Область применения: распределение ресурсов, планирование работ, управление открытыми многоагентными системами (МАС) с динамическим составом агентов и задач.  
+  - Проблема: статические ЛЗН не учитывают динамику и шум; частый полный пересчёт слишком дорог, а игнорирование динамики — ухудшает качество.  
+  - Идея: реоптимизация — наследование решения и сопутствующей информации (потенциалы, интервалы устойчивости, структуры пополняющих путей) между шагами.  
+- Формулировка цели статьи:[172]
+  - Разработать метод реоптимизации динамической задачи о назначениях в условиях неопределённости, сочетающий:
+    - адаптацию метода потенциалов к динамике;
+    - интервалы устойчивости дуг;
+    - наследование решений и бутстрэппинг предопределённых структур.  
+- Структура дальнейшего материала: краткий обзор того, что в Части I — теория и базовые алгоритмы; в Части II — реоптимизация и бутстрэппинг; в Части III — эксперименты и анализ.[172]
+
+***
+
+### Ячейка 2. Импорты, глобальные константы и типы
+
+Код:
+
+- Импорты:
+  - `numpy as np`
+  - `random`
+  - `time`
+  - `itertools`
+  - `from dataclasses import dataclass`
+  - `from typing import Dict, Tuple, List, Set, Optional, Any, Hashable`
+  - `from scipy.optimize import linear_sum_assignment`
+  - `import matplotlib.pyplot as plt`
+- Фиксация генераторов случайных чисел:
+  - `RNG_SEED = 42`
+  - `np.random.seed(RNG_SEED)`
+  - `random.seed(RNG_SEED)`
+- Глобальные константы, привязанные к теории:[172]
+  - `DEFAULT_T` — число шагов \(T\) в динамическом горизонте.
+  - `DEFAULT_LAMBDA` — базовое значение штрафа \(\lambda\) в функционале \(F^{(t)}\) (формула (5)).
+  - `DEFAULT_AVG_DEGREE` — целевое среднее число дуг на вершину в \(G^{(t)}\).
+  - `BIG_M` — большое число для искусственного запрещения дуг при построении полной матрицы стоимостей.
+  - Числовые параметры для устойчивости:
+    - `EPS = 1e-9` — допуск на ноль для \(\delta_{ij}\);
+    - `EPS_BUFFER` — буфер для интервалов устойчивости (смягчение границ);
+    - `MARGIN_DOWN_CONST` — константа для нижнего запаса;
+    - `BIG_UP_CONST` — для верхней границы.[172]
+- Типы:
+  - `SubgraphSignature = Hashable`.
+
+***
+
+### Ячейка 3. Структуры данных: параметризация шума, динамики и графа
+
+Код с dataclass:
+
+1. `@dataclass NoiseParams` — параметры шума \(\xi_{ij}^{(t)}\) (формула (7)):[172]
+   - `sigma: float` — стандартное отклонение для гауссовского или масштабирующий параметр.
+   - `jump_prob: float` — вероятность «блочного» скачка.
+   - `jump_amplitude: float` — типичный масштаб блока.
+   - `noise_type: str` — `"gaussian"`, `"uniform"`, `"block_jumps"`.
+
+2. `@dataclass DynamicsParams` — параметры динамики открытой МАС:[172]
+   - `prob_add_agent`, `prob_remove_agent`
+   - `prob_add_task`, `prob_remove_task`
+   - `prob_add_edge`, `prob_remove_edge`
+
+3. `@dataclass AssignmentState` — представление графа назначения \(G^{(t)} = (A^{(t)},B^{(t)},E^{(t)},C^{(t)})\):[172]
+   - `A: List[int]` — индексы агентов;
+   - `B: List[int]` — индексы задач;
+   - `edges: Set[Tuple[int,int]]` — множество дуг \((i,j)\);
+   - `costs: Dict[Tuple[int,int], float]` — текущие стоимости \(c_{ij}^{(t)}\).
+   - (опционально) поля для списков смежности:
+     - `adj_A: Dict[int, List[int]]` — список задач для каждого агента;
+     - `adj_B: Dict[int, List[int]]` — список агентов для каждой задачи.[172]
+
+Комментарии в ячейке:
+
+- Связь с формальным определением динамической среды и двудольного графа в разделе «Постановка динамической задачи о назначениях».[172]
+
+***
+
+### Ячейка 4. Инициализация начального состояния \(G^{(1)}\)
+
+Цель — создать исходный двудольный граф \(G^{(1)}\) согласно описанию: фиксированные множества агентов и задач, разрежённое множество дуг.[172]
+
+Код:
+
+- Функция `create_initial_state(m: int, n: int, avg_degree: int) -> AssignmentState`:
+  - Формирует:
+    - `A = list(range(m))`;
+    - `B = list(range(n))`.
+  - Для каждого агента `i ∈ A`:
+    - выбирает случайную степень `deg` из `[1, avg_degree]` (возможно, ограничивает `deg ≤ n`);
+    - случайно выбирает `deg` задач из `B` без повторений;
+    - добавляет дуги `(i,j)` в `edges`.
+  - Заполняет списки смежности `adj_A[i]`, `adj_B[j]`.
+  - Возвращает `AssignmentState(A,B,edges,costs={})`.
+
+Текстовые комментарии:
+
+- Указать, что такой способ генерации согласован с описанием разрежённого графа назначения с фиксированной средней степенью вершины.[172]
+
+***
+
+## Блок 2. Стохастическая модель стоимости и динамика графа
+
+### Ячейка 5. Номинальная матрица стоимостей и шум (формула (7))
+
+Реализует модель \(c_{ij}^{(t)} = \bar c_{ij}^{(t)} + \xi_{ij}^{(t)}\).[172]
+
+Функции:
+
+1. `generate_nominal_costs(state: AssignmentState, low: float = 0.0, high: float = 10.0) -> Dict[Tuple[int,int], float]`:
+   - Для каждого \((i,j) ∈ state.edges` генерирует \(\bar c_{ij}^{(t)} \sim U[low, high]\).
+   - Возвращает словарь `nominal`.[172]
+
+2. `apply_noise(nominal, noise_params: NoiseParams, step: int) -> Dict[Tuple[int,int], float]`:
+   - Для каждой дуги \((i,j)`:
+     - в зависимости от `noise_type`:
+       - `"gaussian"`: \(\xi ∼ \mathcal N(0,\sigma^2)\);
+       - `"uniform"`: \(\xi ∼ U[-a, a]\) с \(a\) указываемым явно или через `sigma`;
+       - `"block_jumps"`: с вероятностью `jump_prob` добавляет или вычитает `jump_amplitude` (или генерирует кластер связанных дуг с одинаковым смещением).[172]
+   - Возвращает словарь фактических стоимостей.
+
+3. `build_costs_for_step(state: AssignmentState, nominal_base: Dict[(i,j), float], noise_params: NoiseParams, step: int) -> Dict[(i,j), float]`:
+   - Вызывает `apply_noise` и записывает результат в `state.costs[(i,j)]`.
+   - Возвращает тот же словарь (для удобства).
+
+В этой же ячейке можно показать короткий пример:
+
+- Сгенерировать имеющийся `state`, `nominal`, `costs`;
+- Вывести статистики (min, max, mean) по \(\bar c\) и \(c\).[172]
+
+***
+
+### Ячейка 6. Динамика графа \(G^{(t)} \to G^{(t+1)}\)
+
+Реализация открытой МАС: изменение множеств агентов, задач и дуг во времени.[172]
+
+Функция `update_state(prev_state: AssignmentState, dyn_params: DynamicsParams, avg_degree: Optional[int] = None) -> AssignmentState`:
+
+Разбивается логически на три подблока (внутренние функции или просто комментариями):
+
+1. **Динамика агентов**:
+   - С вероятностью `prob_add_agent`:
+     - добавить нового агента с индексом `new_i` (наибольший используемый + 1 или переиндексация);
+     - подключить его к `deg` случайным задачам из `B` (как в `create_initial_state`).
+   - С вероятностью `prob_remove_agent`:
+     - удалить случайного агента `i` из `A`;
+     - удалить все дуги `(i,j)` и соответствующие записи в списках смежности.[172]
+
+2. **Динамика задач**:
+   - Аналогично:
+     - с `prob_add_task` добавить новую задачу `new_j` и подключить к некоторым агентам;
+     - с `prob_remove_task` удалить задачу и её дуги.[172]
+
+3. **Динамика дуг**:
+   - С вероятностью `prob_remove_edge` для каждой существующей дуги удалить её;
+   - С вероятностью `prob_add_edge` попытаться добавить несколько новых случайных дуг \((i,j)\), которых ещё нет, соблюдая разрежённость.[172]
+
+Функция возвращает новый `AssignmentState` с обновлёнными `A,B,edges` и пустым `costs`. В комментариях прямо увязать с понятием «открытая многоагентная система» и изменением \(A^{(t)},B^{(t)},E^{(t)}\) из текста.[172]
+
+***
+
+## Блок 3. Статическая ЛЗН и динамический функционал
+
+### Ячейка 7. Полное решение ЛЗН (метод full)
+
+Реализует классическую постановку задачи (1)–(4) и её решение.[172]
+
+Функция `solve_assignment_full(state: AssignmentState) -> Tuple[Dict[(i,j),int], Dict[int,float], Dict[int,float]]`:
+
+- Определяет размеры:
+  - `m = len(A)`, `n = len(B)`, `dim = max(m,n)`.
+- Строит матрицу `C_mat` размера `dim×dim`:
+  - для реальных пар `(i,j)` из `state.edges` записывает `state.costs[(i,j)]`;
+  - для отсутствующих или фиктивных — `BIG_M`.
+- Вызывает `row_ind, col_ind = linear_sum_assignment(C_mat)`.
+- Формирует словарь `X`:
+  - `X[(i,j)] = 1` если `(i,j)` соответствует паре реальных индексов `i in A` и `j in B` и попала в оптимальное сопоставление,
+  - иначе `0`.[172]
+- Инициализирует потенциалы `u,v`:
+  - простой вариант:
+    - `u[i] = min_{j: (i,j)∈E} c_ij`;
+    - `v[j] = min_{i: (i,j)∈E} (c_ij - u[i])` или 0, если дуг нет.[172]
+- Возвращает `X,u,v`.
+
+Необязательный проверочный блок в конце ячейки:
+
+- Вычислить `delta = compute_reduced_costs(state, u, v)` и проверить `check_optimality(delta, X)` для sanity.[172]
+
+***
+
+### Ячейка 8. Функционалы \(\Phi\) и \(F^{(t)}\) (формулы (5),(6))
+
+Реализация динамического функционала и меры расхождения.[172]
+
+1. `phi_diff(X_prev, X_curr, weights: Optional[Dict[(i,j),float]] = None) -> float`:
+
+- Если `weights is None`:
+  - \(\Phi(X^{(t-1)},X^{(t)}) = \sum_{i,j} |x_{ij}^{(t)} - x_{ij}^{(t-1)}|\). [172]
+- Если `weights` задан:
+  - \(\Phi = \sum w_{ij} |x_{ij}^{(t)} - x_{ij}^{(t-1)}|\) — обобщение, как в тексте. [172]
+
+2. `objective_F(state, X_curr, X_prev: Optional[Dict[(i,j),int]], lambda_penalty: float, weights=None) -> float`:
+
+- Считает базовую стоимость:
+  - `cost_term = sum(state.costs[(i,j)] * X_curr.get((i,j),0) for (i,j) in state.edges)`.
+- Если `X_prev is None`:
+  - `phi_term = 0.0`.
+- Иначе:
+  - `phi_term = phi_diff(X_prev, X_curr, weights)`.
+- Возвращает `cost_term + lambda_penalty * phi_term`, реализуя формулу (5).[172]
+
+В примере внизу ячейки можно:[172]
+
+- Взять два искусственных решения `X_prev, X_curr`, показать \(\Phi\) и \(F^{(t)}\) при разных \(\lambda\).
+
+***
+
+### Ячейка 9. Потенциалы и редуцированные стоимости (формулы (8),(11))
+
+Эта ячейка отвечает за формальное введение \(\delta_{ij}\) и проверку оптимальности по методу потенциалов.[172]
+
+Функции:
+
+1. `compute_reduced_costs(state: AssignmentState, u: Dict[int,float], v: Dict[int,float]) -> Dict[(i,j), float]`:
+   - Для каждой дуги `(i,j) in state.edges`:
+     - `delta[(i,j)] = state.costs[(i,j)] - u.get(i,0.0) - v.get(j,0.0)`.[172]
+
+2. `check_optimality(delta: Dict[(i,j),float], X: Dict[(i,j),int], eps: float = EPS) -> bool`:
+   - Проверяет:
+     - для всех `(i,j)` `delta_ij >= -eps` (неотрицательность с допуском);
+     - для всех `(i,j)` с `X[(i,j)] == 1` выполняется `abs(delta_ij) <= eps`.[172]
+   - Возвращает `True/False`.
+
+Иллюстративная часть:
+
+- Применить `compute_reduced_costs` и `check_optimality` к решению, полученному в Ячейке 7, и вывести, выполнена ли оптимальность в смысле метода потенциалов.[172]
+
+***
+
+### Ячейка 10. Интервалы устойчивости дуг (формула (9), текст про интервал \([\underline c,\bar c]\))
+
+Реализация ключевого элемента: интервалов устойчивости для дуг и решения.[172]
+
+Функция `compute_stability_intervals(state: AssignmentState, X: Dict[(i,j),int], u: Dict[int,float], v: Dict[int,float], margin_down_const: float = MARGIN_DOWN_CONST, big_up_const: float = BIG_UP_CONST, eps_buffer: float = EPS_BUFFER) -> Dict[(i,j),(float,float)]`:
+
+- Общие шаги:
+  1. Вычислить `delta = compute_reduced_costs(state, u, v)`.[172]
+  2. Разделить дуги на базисные (с `X[(i,j)] == 1`) и небазисные.[172]
+
+- Для дуг в назначении (базис):[172]
+  - Нижняя граница \(\underline c_{ij}\):
+    - оценивается через «запас» до возникновения альтернативы:
+      - например, \(\underline c_{ij} = c_{ij} - margin_down_const * \Delta_{down}\), где \(\Delta_{down}\) связано с минимальной положительной \(\delta\) дуг, которые могли бы заменить текущую дугу;
+      - плюс небольшой `eps_buffer`.  
+  - Верхняя граница \(\bar c_{ij}\):
+    - учитывает минимальную положительную \(\delta\) небазисных дуг, которые могли бы войти вместо данной дуги:
+      - \(\bar c_{ij} = c_{ij} + \Delta_{up} - eps\_buffer\), где \(\Delta_{up}\) — минимальное положительное \(\delta\) среди конкурирующих дуг.[172]
+
+- Для дуг вне назначения:[172]
+  - Интервал устойчивости описывает диапазон, в котором дуга остаётся вне любого оптимального решения:
+    - \(\underline c_{ij} = -\infty\) или `c_ij - big_up_const`, если изменения вниз не нарушают оптимальность;
+    - \(\bar c_{ij} = c_{ij} + \delta_{ij} - eps_buffer` (по сути, граница, при которой дуга может стать выгодной).  
+
+- Гарантировать:
+  - `c_min < c_max` для всех дуг (при необходимости слегка раздвигать границы с помощью `eps_buffer`).
+
+Текстовые комментарии:
+
+- Объяснить, как локальные интервалы для дуг формируют глобальный интервал устойчивости решения (область изменения всей матрицы, в которой решение сохраняется). [file:239]
+
+***
+
+### Ячейка 11. Вероятностный критерий критичности (формула (10))
+
+Эта ячейка связывает интервалы устойчивости с моделью шума и вводит \(p_{ij}^{(t)}\).[172]
+
+Функции:
+
+1. `compute_criticality_probabilities(stability_prev, nominal_next, noise_params: NoiseParams) -> Dict[(i,j), float]`:
+   - Для каждой дуги `(i,j)`:
+     - берёт интервал \([\underline c_{ij}^{(t)}, \bar c_{ij}^{(t)}]\) из `stability_prev`;
+     - предполагает, что \(c_{ij}^{(t+1)} = \bar c_{ij, \text{next}}^{(t+1)} + \xi_{ij}^{(t+1)}\), где `nominal_next[(i,j)]` — прогнозное значение;[172]
+     - при гауссовском шуме:
+       - оценивает \(p_{ij}^{(t)} = P\{c_{ij}^{(t+1)} \notin [\underline c,\bar c]\}\) через нормальное распределение (CDF);
+     - при других типах шума — упрощённо (например, однородное распределение и аналитическая формула).[172]
+   - Возвращает словарь `p_crit[(i,j)]`.
+
+2. `select_critical_edges_probabilistic(state_new, stability_prev, noise_params, alpha: float, nominal_next) -> Set[(i,j)]`:
+   - Вызывает `compute_criticality_probabilities`;
+   - выбирает дуги, для которых `p_crit[(i,j)] >= alpha` — вероятностно критичные дуги.[172]
+
+Комментарии:
+
+- Явно связать с формулой (10) и текстом о том, что дуга считается критичной, если вероятность выхода стоимости за интервал \(≥ α\), и поэтому включается в подграф реоптимизации.[172]
+
+***
+
+### Ячейка 12. Формирование критичного подграфа \(G_{\text{crit}}^{(t+1)}\) (формула (12))
+
+Завершает первую часть теории: переход от интервалов к подграфу реоптимизации.[172]
+
+Функции:
+
+1. `build_critical_edges(state_new: AssignmentState, stability_prev, violation_threshold: float, max_crit_edges: Optional[int] = None, use_probabilistic: bool = False, alpha: Optional[float] = None, noise_params: Optional[NoiseParams] = None, nominal_next: Optional[Dict[(i,j),float]] = None) -> Set[(i,j)]`:
+
+- **Детерминированный критерий** (по формуле (9) и описанию текста):[172]
+  - Для каждой дуги `(i,j) in state_new.edges`:
+    - берёт `c_new = state_new.costs[(i,j)]`;
+    - берёт интервал `c_min, c_max = stability_prev.get((i,j), (-inf, +inf))`;
+    - если `c_new` выходит за пределы интервала и величина нарушения (например, `min(c_min - c_new, c_new - c_max)` по модулю) больше `violation_threshold`, добавляет дугу в список кандидатов.
+  - Сортирует кандидатов по силе нарушения, обрезает до `max_crit_edges`, если задан.
+
+- **Вероятностный режим** (опциональный):[172]
+  - Если `use_probabilistic` и `alpha` заданы:
+    - строит `E_crit_prob = select_critical_edges_probabilistic(...)`;
+    - комбинирует `E_crit_det` и `E_crit_prob` (например, объединение или пересечение — выбор описать в комментариях).
+
+- Возвращает итоговый `E_crit`.
+
+2. `induce_subgraph(state_new: AssignmentState, E_crit: Set[(i,j)]) -> AssignmentState`:
+
+- Формирует:
+  - `A_crit` — множество агентов, инцидентных дугам `E_crit`;
+  - `B_crit` — множество задач, инцидентных дугам `E_crit`;
+  - `costs_crit[(i,j)] = state_new.costs[(i,j)]` для `(i,j) in E_crit`;
+  - списки смежности по `A_crit,B_crit`.[172]
+
+Комментарии:
+
+- Прямо сослаться на формулу (12), где \(E_{\text{crit}}^{(t+1)}\) определяется как дуги, нарушающие интервалы устойчивости, и на определение индуцированного подграфа \(G_{\text{crit}}^{(t+1)}\).[172]
+
+***
+
+Таким образом, Часть I завершает полный теоретический блок: постановка динамической задачи с функционалом \(F^{(t)}\), стохастическая модель стоимостей, интервал устойчивости дуг и вероятностный критерий критичности, а также формирование критичного подграфа, на котором в Части II будет построен алгоритм реоптимизации и бутстрэппинга.[172]
+
+Вторая часть отвечает за сам алгоритм реоптимизации: наследование решения и потенциалов, локальную корректировку на критичном подграфе, а затем усложнение за счёт бутстрэппинга и шаблонов. Ниже подробный план Части II, согласованный с текстом разделов про алгоритм реоптимизации, SAP и бутстрэппинг.[172]
+
+***
+
+## Часть II. Алгоритм реоптимизации и бутстрэппинг
+
+### Блок 4. Локальная реоптимизация без шаблонов
+
+#### Ячейка 13. Наследование решения и потенциалов при переходе \(t \to t+1\)
+
+Содержимое:
+
+1. `inherit_assignment(X_prev, state_prev, state_new) -> Dict[Tuple[int,int], int]`:
+
+- Для всех дуг `(i,j)` в новом графе `state_new.edges`:
+  - если `(i,j)` присутствовала в `state_prev.edges` и `X_prev[(i,j)] == 1`, то `X_init[(i,j)] = 1`;
+  - иначе `X_init[(i,j)] = 0`.[172]
+- Гарантия:
+  - полученное \(X^{(t+1,0)}\) удовлетворяет ограничениям (2)–(4) с учётом исчезнувших дуг.[172]
+
+2. `inherit_potentials(u_prev, v_prev, state_prev, state_new) -> Tuple[Dict[int,float], Dict[int,float]]`:
+
+- Для каждого агента `i`:
+  - если `i` был и в `state_prev.A`, и в `state_new.A`, тогда `u_new[i] = u_prev[i]`;
+  - иначе (новый агент) `u_new[i] = 0.0`.[172]
+- Аналогично для задач `j` и `v_new[j]`.[172]
+- Комментарий:
+  - это прямая реализация наследования \(u_i^{(t+1)} := u_i^{(t)}, v_j^{(t+1)} := v_j^{(t)}\) для общих вершин из раздела про адаптацию метода потенциалов к динамике.[172]
+
+Можно добавить небольшой пример: взять искусственные `state_prev`, `state_new` с добавлением/удалением нескольких вершин и дуг и показать, какие компоненты наследуются, а какие обнуляются.[172]
+
+***
+
+#### Ячейка 14. Остаточный граф на \(G_{\text{crit}}\) и поиск пополняющего пути (SAP)
+
+Содержимое:
+
+1. `_build_residual_graph_on_subgraph(X, state_crit) -> Dict[int, List[int]]`:
+
+- Исходит из текущего назначения `X` и подграфа `state_crit`:
+  - если `X[(i,j)] == 0` (дуга не в назначении), в остаточном графе добавляется дуга `i → j`;[172]
+  - если `X[(i,j)] == 1` (дуга в назначении), добавляется дуга `j → i`;[172]
+- Возвращает ориентированный список смежности `residual_adj`.
+
+2. `_bfs_augmenting_path(residual_adj, start: int, free_targets: List[int]) -> Optional[List[int]]`:
+
+- Реализует BFS по остаточному графу:
+  - вход: стартовая вершина `start` (свободная вершина одной доли) и множество `free_targets` (свободные вершины противоположной доли);[172]
+  - поиск кратчайшего пути от `start` до любой вершины из `free_targets`;
+  - при успехе восстанавливает путь по `parent` и возвращает список вершин;
+  - при отсутствии пути возвращает `None`.[172]
+
+Комментарии:
+
+- В тексте это описано как построение пополняющих путей в духе SAP на ограниченном подграфе \(G_{\text{crit}}^{(t+1)}\).[172]
+
+***
+
+#### Ячейка 15. Одна итерация локальной реоптимизации на \(G_{\text{crit}}\)
+
+Содержимое:
+
+`augment_on_subgraph(start_edge, X, u, v, state_new, state_crit, lambda_penalty, X_prev=None) -> bool`:
+
+Логика:
+
+1. Построение остаточного графа:
+
+- `residual_adj = _build_residual_graph_on_subgraph(X, state_crit)`.[172]
+
+2. Определение свободных вершин:
+
+- `A_crit = set(state_crit.A)`, `B_crit = set(state_crit.B)`;
+- `matched_agents` — агенты `i∈A_crit`, для которых существует дуга `(i,j)` с `X[(i,j)] == 1` в `state_crit`;
+- `matched_tasks` — аналогично для задач;
+- `free_agents = A_crit - matched_agents`;
+- `free_tasks = B_crit - matched_tasks`.[172]
+
+3. Выбор стартовой вершины и целевых свободных:
+
+- Если `start_edge = (i0,j0)`:
+  - если `i0` свободен, берём `start_vertex = i0`, `free_targets = free_tasks`;
+  - иначе, если `j0` свободен, `start_vertex = j0`, `free_targets = free_agents`;
+- если стартовая дуга не даёт свободной вершины, выбираем любую свободную вершину одной доли и соответствующие целевые.[172]
+
+4. Поиск пополняющего пути:
+
+- `path = _bfs_augmenting_path(residual_adj, start_vertex, free_targets)`;
+- если `path is None`, возвращаем `False`.
+
+5. Ограничение длины пути:
+
+- `max_path_len = 2 * (|A_crit| + |B_crit|)`;
+- если `len(path) > max_path_len`, путь отбрасывается.[172]
+
+6. Учёт штрафа \(\lambda\) и ограничение числа изменений:
+
+- Если `lambda_penalty > 0` и `X_prev` задан:
+  - проходим по последовательным вершинам пути и восстанавливаем дуги `(i,j)` или `(j,i)` относительно `state_new.edges`;
+  - считаем `changed_edges` — число дуг, для которых новое значение `1 - X[(i,j)]` отличается от `X_prev[(i,j)]`;[172]
+  - задаём базовый лимит, например `base_limit ≈ 0.3%` от `|E|` (как функция размера задачи);
+  - в зависимости от `lambda_penalty` уменьшаем или обнуляем `max_allowed_changes` (для больших λ допустимых изменений меньше);[172]
+  - если `changed_edges > max_allowed_changes`, возврат `False`.
+
+7. Инвертирование назначения вдоль пути:
+
+- Для всех дуг на пути:
+  - `X[(i,j)] = 1 - X.get((i,j),0)`.[172]
+
+Функция возвращает `True`, если удалось выполнить допустимое улучшение (назначение изменилось).[172]
+
+***
+
+#### Ячейка 16. Базовый алгоритм reoptimize_step (без бутстрэппинга)
+
+Содержимое:
+
+`reoptimize_step(state_prev, C_prev, X_prev, u_prev, v_prev, stability_prev, state_new, C_new, lambda_penalty, violation_threshold=0.0, max_crit_edges=None, use_probabilistic=False, alpha=None, noise_params=None) -> (X_new, u_new, v_new, stability_new)`:
+
+1. Обновление стоимостей и наследование:
+
+- `state_new.costs = C_new`;[172]
+- `u_new, v_new = inherit_potentials(u_prev, v_prev, state_prev, state_new)`;[172]
+- `X_init = inherit_assignment(X_prev, state_prev, state_new)`;
+- `X_new = dict(X_init)`.
+
+2. Формирование критичного множества \(E_{\text{crit}}^{(t+1)}\):
+
+- Вызов `build_critical_edges(state_new, stability_prev, violation_threshold, max_crit_edges, use_probabilistic, alpha, noise_params, nominal_next)`.[172]
+- Если `E_crit` пусто:
+  - считаем, что решение устойчиво:
+    - `stability_new = compute_stability_intervals(state_new, X_new, u_new, v_new)`;[172]
+    - возвращаем `X_new, u_new, v_new, stability_new`.
+
+3. Локальная корректировка на \(G_{\text{crit}}\):
+
+- `state_crit = induce_subgraph(state_new, E_crit)`.[172]
+- Цикл:
+
+```python
+improved = True
+while improved:
+    improved = False
+    delta_full = compute_reduced_costs(state_new, u_new, v_new)
+    delta_crit = {e: delta_full[e] for e in state_crit.edges}
+    violating_edges = [(i,j) for (i,j), d in delta_crit.items() if d < 0.0]
+    if not violating_edges:
+        break
+    for (i,j) in violating_edges:
+        if augment_on_subgraph((i,j), X_new, u_new, v_new, state_new, state_crit, lambda_penalty, X_prev):
+            improved = True
+            break
+```
+
+- Цикл повторяется, пока удаётся хотя бы одно улучшение (как в псевдокоде в тексте).[172]
+
+4. Пересчёт интервалов устойчивости:
+
+- `stability_new = compute_stability_intervals(state_new, X_new, u_new, v_new)`;[172]
+- Возвращаем результат.
+
+Комментарии:
+
+- Эта функция реализует «второй базовый подход» статьи — реоптимизацию с частичным наследованием без использования глобальных шаблонов и бутстрэппинга.[172]
+
+***
+
+### Блок 5. Бутстрэппинг и шаблоны
+
+#### Ячейка 17. Глобальное состояние для бутстрэппинга
+
+Содержимое:
+
+Определение `global_state: Dict[str, Any]`:
+
+- `"potentials"`: `Dict[int, Tuple[Dict[int,float], Dict[int,float]]]`:
+  - ключ — номер шага `t`;
+  - значение — копия потенциалов `(u_t, v_t)` для этого шага.[172]
+- `"stability_intervals"`: `Dict[int, Dict[Tuple[int,int], Tuple[float,float]]]`:
+  - интервалы устойчивости дуг на шаге `t`.[172]
+- `"augment_trees"`: `Dict[int, Any]`:
+  - структуры, хранящие дерево пополняющих путей или трассировки поиска SAP (минимум — словарь с `X`, максимум — полноценное дерево).[172]
+- `"templates"`: `Dict[SubgraphSignature, Any]`:
+  - шаблоны для типичных подграфов (подпись → паттерн).[172]
+
+Комментарии:
+
+- Прямо увязать с обсуждением «предопределённых структур» и «predefined solutions» (потенциалы, интервалы, деревья путей, шаблоны подграфов).[172]
+
+***
+
+#### Ячейка 18. Подписи подграфов и шаблоны реоптимизации
+
+Содержимое:
+
+1. `compute_signature(state_crit: AssignmentState) -> SubgraphSignature`:
+
+- Вычисляет компактную подпись подграфа \(G_{\text{crit}}\):[172]
+  - `num_A = len(A_crit)`, `num_B = len(B_crit)`, `num_E = len(E_crit)`;
+  - статистики по `costs`:
+    - `c_min`, `c_max`, среднее `c_mean`;
+  - средняя степень вершин:
+    - средняя по `deg_A` и `deg_B`.[172]
+- Возвращает хэшируемый кортеж `(num_A, num_B, num_E, round(c_min,2), ..., round(avg_deg_B,2))`.
+
+2. `extract_frequent_subgraphs(state: AssignmentState, X: Dict[(i,j),int]) -> List[AssignmentState]`:
+
+- Эвристика:
+  - выделяет, например:
+    - подграф, состоящий из всех базисных дуг `X[(i,j)] == 1`;
+    - при желании — подграфы по кластерам или по частым структурам (звёзды, цепочки).[172]
+- Возвращает список `AssignmentState` для этих подграфов.
+
+3. `build_reoptimization_pattern(subgraph: AssignmentState, X_t, u_t, v_t) -> Dict[str,Any]`:
+
+- Формирует шаблон:
+  - `base_edges = [(i,j) for (i,j) in subgraph.edges if X_t.get((i,j),0) == 1]`;
+  - локальные потенциалы:
+    - `u_local = {i: u_t[i] for i in subgraph.A}`;
+    - `v_local = {j: v_t[j] for j in subgraph.B}`;
+  - `edge_order = base_edges` или иной упорядоченный список дуг.[172]
+- Возвращает словарь-паттерн, который позже будет использоваться в `apply_pattern`.
+
+Комментарии:
+
+- Объяснить, что в полной версии сюда могут добавляться реальные маршруты пополняющих путей, а не только порядок дуг.[172]
+
+***
+
+#### Ячейка 19. Инициализация бутстрэппинга (bootstrap_init)
+
+Содержимое:
+
+`bootstrap_init(t, state, X_t, u_t, v_t, stability_t, augment_tree_t=None) -> None`:
+
+- Сохраняет «опорное» состояние для шага `t`:
+
+```python
+from copy import deepcopy
+
+global_state["potentials"][t] = (deepcopy(u_t), deepcopy(v_t))
+global_state["stability_intervals"][t] = deepcopy(stability_t)
+global_state["augment_trees"][t] = deepcopy(augment_tree_t)
+```
+
+- Строит шаблоны:
+
+```python
+for subgraph in extract_frequent_subgraphs(state, X_t):
+    signature = compute_signature(subgraph)
+    pattern = build_reoptimization_pattern(subgraph, X_t, u_t, v_t)
+    global_state["templates"][signature] = pattern
+```
+
+Комментарии:
+
+- Эта ячейка реализует псевдокод `bootstrap_init` из текста, где после шага t сохраняются потенциалы, интервалы устойчивости, дерево пополняющих путей и шаблоны подграфов для будущих запусков реоптимизации.[172]
+
+***
+
+#### Ячейка 20. Применение шаблона и fallback‑реоптимизация
+
+Содержимое:
+
+1. `apply_pattern(X, u, v, state_new, state_crit, pattern, lambda_penalty, X_prev=None) -> None`:
+
+- Если `pattern is None`, просто возвращает;
+- Извлекает:
+  - `edge_order`, `u_local`, `v_local` из `pattern`;
+- Обновляет потенциалы на вершинах \(G_{\text{crit}}\):
+  - `u[i] = u_local[i]` для `i in A_crit`, если есть;
+  - `v[j] = v_local[j]` для `j in B_crit`.[172]
+- Проходит по `edge_order`:
+  - для каждой дуги `(i,j)` в подграфе вызывает `augment_on_subgraph((i,j), ...)` с тем же `lambda_penalty` и `X_prev`;
+  - не гарантирует, что все дуги будут использованы, но реализует «типовой сценарий улучшения».[172]
+
+2. `local_reoptimization(X, u, v, state_new, state_crit, lambda_penalty, X_prev=None, max_iterations=100) -> None`:
+
+- Fallback‑процедура (когда шаблон не найден или не подходит):
+  - цикл по итерациям:
+    - считает `delta_full = compute_reduced_costs`;
+    - ограничивает `delta_crit` дугами `state_crit.edges`;
+    - формирует список дуг с `delta_ij < 0`;
+    - если список пуст — завершает;
+    - пробует вызвать `augment_on_subgraph` хотя бы по одной нарушенной дуге;
+    - если ни одна дуга не даёт улучшения — завершает.[172]
+
+Комментарии:
+
+- Связать с текстом: «если найден шаблон — используем предопределённый сценарий; иначе выполняется локальная реоптимизация на критичном подграфе».[172]
+
+***
+
+#### Ячейка 21. Наследование назначения из augment_tree
+
+Содержимое:
+
+`inherit_assignment_from_tree(augment_tree_prev: Any, state_new: AssignmentState) -> Dict[(i,j),int]`:
+
+- Упрощённая реализация:
+
+  - Если `augment_tree_prev` — словарь с ключом `"X"`:
+    - берёт `X_old = augment_tree_prev["X"]`;
+    - для всех `(i,j) in state_new.edges`:
+      - `X_new[(i,j)] = int(X_old.get((i,j),0))`;
+  - Иначе возвращает пустой словарь `{}`.[172]
+
+Комментарии:
+
+- В тексте под `augment_tree` могут пониматься более богатые структуры (дерево пополняющих путей, трассировки); здесь предусмотрен простой формат, которого достаточно для базовой реализации бутстрэппинга.[172]
+
+***
+
+### Блок 6. Реоптимизация с бутстрэппингом и общий сценарий
+
+#### Ячейка 22. Реоптимизация с бутстрэппингом (reoptimize_with_bootstrap)
+
+Содержимое:
+
+`reoptimize_with_bootstrap(t_prev, state_new, C_new, lambda_penalty, violation_threshold=0.0, max_crit_edges=None, X_prev=None, use_probabilistic=False, alpha=None, noise_params=None, nominal_next=None) -> (X_new, u_new, v_new, stability_new)`:
+
+1. Наследование глобальных структур:
+
+- `u_prev, v_prev = global_state["potentials"].get(t_prev, ({},{ }))`;
+- `intervals_prev = global_state["stability_intervals"].get(t_prev, {})`;
+- `augment_tree_prev = global_state["augment_trees"].get(t_prev, None)`.[172]
+- `state_new.costs = C_new`.
+
+2. Формирование \(E_{\text{crit}}\) по интервалам:
+
+- Если `intervals_prev` непусты:
+  - `E_crit = build_critical_edges(state_new, intervals_prev, violation_threshold, max_crit_edges, use_probabilistic, alpha, noise_params, nominal_next)`;[172]
+- Иначе:
+  - fallback — считать критичным весь граф: `E_crit = set(state_new.edges)`.
+
+3. Если `E_crit` пусто:
+
+- Наследование потенциалов внутри самого `state_new`:
+  - `u_new, v_new = inherit_potentials(u_prev, v_prev, state_prev=state_new, state_new=state_new)` (фактически копия).[172]
+- Формирование `X_new`:
+  - попытка взять из дерева: `X_new = inherit_assignment_from_tree(augment_tree_prev, state_new)`;
+  - если пусто — `X_new = {e:0 for e in state_new.edges}`;
+- `stability_new = compute_stability_intervals(state_new, X_new, u_new, v_new)`;
+- возврат.
+
+4. Построение критичного подграфа и поиск шаблона:
+
+- `state_crit = induce_subgraph(state_new, E_crit)`;[172]
+- `signature = compute_signature(state_crit)`;
+- `pattern = global_state["templates"].get(signature, None)`.
+
+5. Наследование потенциалов и стартового решения:
+
+- `u_new = {i: u_prev.get(i,0.0) for i in state_new.A}`;
+- `v_new = {j: v_prev.get(j,0.0) for j in state_new.B}`;[172]
+- `X_from_tree = inherit_assignment_from_tree(augment_tree_prev, state_new)`;
+- если `X_from_tree` непуст:
+  - `X_new = X_from_tree`;
+- иначе, если `X_prev` есть:
+  - задать `X_new[(i,j)] = int(X_prev.get((i,j),0))` для всех `(i,j) in state_new.edges`;[172]
+- иначе:
+  - `X_new = {e:0 for e in state_new.edges}`.
+
+6. Применение шаблона или fallback‑реоптимизация:
+
+- Если `pattern is not None`:
+  - `apply_pattern(X_new, u_new, v_new, state_new, state_crit, pattern, lambda_penalty, X_prev)`;
+- Иначе:
+  - `local_reoptimization(X_new, u_new, v_new, state_new, state_crit, lambda_penalty, X_prev)`.[172]
+
+7. Пересчёт интервалов устойчивости:
+
+- `stability_new = compute_stability_intervals(state_new, X_new, u_new, v_new)`;
+- возврат.[172]
+
+Комментарии:
+
+- Эта ячейка реализует псевдокод `reoptimize_with_bootstrap`, где при переходе к новому шагу используется богатый наследуемый контекст: потенциалы, интервалы, дерево путей и шаблоны подграфов.[172]
+
+***
+
+#### Ячейка 23. Базовый run_dynamic_scenario (2 метода, без бутстрэппинга)
+
+Содержимое:
+
+- Реализация «минимального» динамического сценария с методами `"full"` и `"reopt_simple"`:
+
+```python
+def run_dynamic_scenario(..., method: str = "full", ...):
+    assert method in ("full","reopt_simple")
+    # t = 1: всегда full
+    state = create_initial_state(...)
+    nominal_1 = generate_nominal_costs(state)
+    C_1 = build_costs_for_step(state, nominal_1, noise_params, step=1)
+    X_1, u_1, v_1 = solve_assignment_full(state)
+    stability_1 = compute_stability_intervals(state, X_1, u_1, v_1)
+    # метрики за t=1
+    # далее t=2..T:
+    for t in range(2, T+1):
+        state_new = update_state(state_prev, dyn_params, avg_degree)
+        nominal_t = generate_nominal_costs(state_new)
+        C_t = build_costs_for_step(state_new, nominal_t, noise_params, step=t)
+        if method == "full":
+            X_t, u_t, v_t = solve_assignment_full(state_new)
+            stability_t = compute_stability_intervals(state_new, X_t, u_t, v_t)
+            E_crit_t = set()
+        else:  # reopt_simple
+            X_t, u_t, v_t, stability_t = reoptimize_step(
+                state_prev, C_prev, X_prev, u_prev, v_prev,
+                stability_prev, state_new, C_t, lambda_penalty, ...
+            )
+            E_crit_t = build_critical_edges(state_new, stability_prev, ...)
+        # вычисление метрик времени, стоимости, F, изменений и т.д.
+```
+
+- Эта ячейка завершает «второй базовый подход» (без использования global_state), который затем расширяется в следующей ячейке.[172]
+
+***
+
+#### Ячейка 24. Расширенный run_dynamic_scenario (3 метода, с бутстрэппингом)
+
+Содержимое:
+
+- Финальная версия `run_dynamic_scenario`, поддерживающая методы:
+
+  - `"full"` — полный пересчёт на каждом шаге;[172]
+  - `"reopt_simple"` — реоптимизация через `reoptimize_step`;[172]
+  - `"reopt_bootstrap"` — реоптимизация через `reoptimize_with_bootstrap` с `t_prev = t-1`.[172]
+
+Ключевые элементы:
+
+1. На шаге `t = 1`:
+
+- Всегда выполняется полный пересчёт:
+  - `X_1, u_1, v_1 = solve_assignment_full(state_1)`;
+  - `stability_1 = compute_stability_intervals(... )`.[172]
+- Вызов `bootstrap_init(1, state_1, X_1, u_1, v_1, stability_1, augment_tree_t={"X": X_1})` для подготовки глобального состояния.[172]
+
+2. На шагах `t ≥ 2`:
+
+- Для `"full"` — как прежде;
+- Для `"reopt_simple"` — как в Ячейке 23;
+- Для `"reopt_bootstrap"`:
+  - вызов `reoptimize_with_bootstrap(t_prev=t-1, state_new=state_new, C_new=C_t, ...)`;
+  - после получения `X_t, u_t, v_t, stability_t` — вызов `bootstrap_init(t, state_new, X_t, u_t, v_t, stability_t, augment_tree_t={"X": X_t})`.[172]
+
+3. Сбор метрик:
+
+- На каждом шаге:
+  - `time per step`;
+  - `base_cost` (стоимость без штрафа \(\lambda\));
+  - `F_t` (с учётом \(\lambda\));
+  - число изменённых дуг `Φ(X_{t-1}, X_t)`;
+  - размер `|E_crit|` и отношение `|E_crit|/|E_t|`. [172]
+- Дополнительно (для анализа сложности):
+  - среднее число итераций локальной реоптимизации;
+  - среднее число вызовов `augment_on_subgraph`.[172]
+
+***
+
+#### Ячейка 25. Конфигурация сценариев шума и динамики (подготовка к Части III)
+
+Содержимое:
+
+- Определение наборов:[172]
+  - `sizes = [50, 200, 500]` — малые, средние, крупные задачи;
+  - `noise_levels = ["low", "medium", "high"]`;
+  - `num_runs_per_setting = 7` или `10`;
+  - `T_experiment = DEFAULT_T`.
+- Определение словаря `noise_scenarios`:
+  - `"low"` — малая дисперсия, без скачков;
+  - `"medium"` — средняя дисперсия + редкие блоковые скачки;
+  - `"high"` — высокая дисперсия + более частые/крупные скачки.[172]
+- Параметры `dyn_params_default`:
+  - малые вероятности добавления/удаления агентов, задач и дуг, как описано в разделе про экспериментальный стенд.[172]
+
+Эта ячейка завершает Часть II, подготавливая всё необходимое для запусков многосценарных экспериментов и сравнений методов в Части III.[172]
+
+
+Часть III отвечает за постановку экспериментов, сбор результатов, анализ времени/качества/устойчивости и формирование итоговых таблиц и выводов, как в экспериментальном разделе черновика.[172]
+
+***
+
+## Блок 7. Основные серии экспериментов и `df_results`
+
+### Ячейка 26. Многосценарные эксперименты и формирование `df_results`
+
+Задача ячейки — провести полный набор серий экспериментов для трёх методов (`full`, `reopt_simple`, `reopt_bootstrap`), трёх размеров задач и нескольких уровней шума/λ, и собрать агрегированные показатели в одну таблицу.[172]
+
+Содержимое:
+
+1. Импорт и подготовка:
+
+- `import pandas as pd`
+- Инициализация списка:
+  - `results: List[Dict[str, Any]] = []`.
+
+2. Цикл по размерности:[172]
+
+```python
+for size in sizes:  # [50, 200, 500]
+    m = n = size
+    for noise_id in noise_levels:  # ["low","medium","high"]
+        noise_params = noise_scenarios[noise_id]
+        # набор λ в зависимости от уровня шума
+        if noise_id == "low":
+            lambdas = [0.0, 0.1, 0.3, 1.0]
+        elif noise_id == "medium":
+            lambdas = [0.1, 0.3, 0.7]
+        else:  # "high"
+            lambdas = [0.3, 0.7, 1.0]
+        for lam in lambdas:
+            for method in ["full","reopt_simple","reopt_bootstrap"]:
+                for run in range(num_runs_per_setting):
+                    metrics = run_dynamic_scenario(
+                        T=T_experiment,
+                        m=m,
+                        n=n,
+                        avg_degree=DEFAULT_AVG_DEGREE,
+                        lambda_penalty=lam,
+                        noise_params=noise_params,
+                        dyn_params=dyn_params_default,
+                        method=method,
+                        violation_threshold=0.05,
+                        max_crit_edges=None,
+                    )
+                    # извлечение списков: times, objectives_cost, objectives_F,
+                    # num_changes, crit_sizes, crit_ratios, и при желании
+                    # avg_iters, avg_aug_calls
+                    avg_time = float(np.mean(metrics["times"]))
+                    avg_cost = float(np.mean(metrics["objectives_cost"]))
+                    avg_F = float(np.mean(metrics["objectives_F"]))
+                    avg_changes = float(np.mean(metrics["num_changes"]))
+                    avg_Ecrit = float(np.mean(metrics["crit_sizes"]))
+                    avg_crit_ratio = float(np.mean(metrics["crit_ratios"]))
+                    results.append({
+                        "size": size,
+                        "lambda": lam,
+                        "noise": noise_id,
+                        "method": method,
+                        "run": run,
+                        "avg_time": avg_time,
+                        "avg_cost": avg_cost,
+                        "avg_F": avg_F,
+                        "avg_changes": avg_changes,
+                        "avg_Ecrit": avg_Ecrit,
+                        "avg_crit_ratio": avg_crit_ratio,
+                        # при наличии:
+                        # "avg_iters": ...,
+                        # "avg_aug_calls": ...,
+                    })
+```
+
+3. Формирование DataFrame:
+
+- `df_results = pd.DataFrame(results)`
+- `print("df_results shape:", df_results.shape)`
+
+Комментарии:
+
+- Это «основной набор серий экспериментов» из раздела сравнения методов, где варьируются размерность, уровень шума, λ и метод, а показатели усредняются по времени и по прогонам.[172]
+
+***
+
+### Ячейка 27. Малый sanity‑test с пошаговым анализом
+
+Цель — детально посмотреть, как ведут себя методы по шагам на небольшой задаче, выявить «плохие» шаги и сравнить пошаговые времена и количество изменений.[172]
+
+Содержимое:
+
+1. Настройка малого теста:[172]
+
+- `m_small = n_small = 20`
+- `T_small = 30`
+- `lambda_small = 0.1`
+- `noise_small = noise_scenarios["medium"]` (например)
+- `dyn_small = dyn_params_default`
+
+2. Запуск сценария для каждого метода:
+
+```python
+records_small: List[Dict[str, Any]] = []
+for method in ["full","reopt_simple","reopt_bootstrap"]:
+    metrics = run_dynamic_scenario(
+        T=T_small,
+        m=m_small,
+        n=n_small,
+        avg_degree=DEFAULT_AVG_DEGREE,
+        lambda_penalty=lambda_small,
+        noise_params=noise_small,
+        dyn_params=dyn_small,
+        method=method,
+        violation_threshold=0.05,
+        max_crit_edges=None,
+    )
+    for t in range(1, T_small+1):
+        records_small.append({
+            "t": t,
+            "method": method,
+            "time": metrics["times"][t-1],
+            "cost": metrics["objectives_cost"][t-1],
+            "F": metrics["objectives_F"][t-1],
+            "changes": metrics["num_changes"][t-1],
+            "Ecrit": metrics["crit_sizes"][t-1],
+            "crit_ratio": metrics["crit_ratios"][t-1],
+        })
+```
+
+3. DataFrame и вывод:
+
+- `df_small = pd.DataFrame(records_small)`
+- `print("df_small shape:", df_small.shape)`
+
+4. Анализ отношения времени:
+
+- Pivot:
+
+```python
+df_time_pivot = df_small.pivot(index="t", columns="method", values="time")
+df_time_pivot["ratio_simple"] = df_time_pivot["reopt_simple"] / df_time_pivot["full"]
+df_time_pivot["ratio_bootstrap"] = df_time_pivot["reopt_bootstrap"] / df_time_pivot["full"]
+top5 = df_time_pivot.sort_values("ratio_simple", ascending=False).head(5)
+print(top5[["ratio_simple"]])
+bad_steps = set(top5.index.tolist())
+```
+
+5. Визуализации:
+
+- Время по шагам для трёх методов, выделяя `bad_steps` красными точками для `reopt_simple` и `reopt_bootstrap`.[172]
+- График числа изменённых дуг `changes` по шагам для каждого метода.[172]
+
+***
+
+## Блок 8. Анализ времени, качества и устойчивости
+
+### Ячейка 28. Среднее время vs размер и методы
+
+Цель — показать выигрыш по времени, особенно для `reopt_bootstrap`, как функция размерности.[172]
+
+Содержимое:
+
+1. Аггрегация по размеру и методу:
+
+```python
+df_time_size = (
+    df_results
+    .groupby(["size","method"], as_index=False)["avg_time"]
+    .mean()
+)
+```
+
+2. Линейная шкала:
+
+- Строится график `avg_time` vs `size` для каждого метода с линиями `full`, `reopt_simple`, `reopt_bootstrap`.[172]
+
+3. Логарифмическая шкала по времени:
+
+- Тот же график, но `plt.yscale("log")`, чтобы подчеркнуть различия для крупных задач.[172]
+
+4. Boxplot:
+
+- `df_results.boxplot(column="avg_time", by="method")` с лог‑шкалой, иллюстрирующий распределение времени по всем сценариям для каждого метода.[172]
+
+***
+
+### Ячейка 29. Анализ качества и устойчивости
+
+Цель — показать, что по базовой цели `full` служит эталоном, а реоптимизационные методы дают сопоставимое качество при меньшем числе изменений и контролируемом динамическом функционале \(F^{(t)}\).[172]
+
+Содержимое:
+
+1. `avg_cost` vs размер по методам:
+
+```python
+df_cost_size = (
+    df_results
+    .groupby(["size","method"], as_index=False)["avg_cost"]
+    .mean()
+)
+# график: size vs avg_cost для трёх методов
+```
+
+2. `avg_F` vs размер по методам:
+
+```python
+df_F_size = (
+    df_results
+    .groupby(["size","method"], as_index=False)["avg_F"]
+    .mean()
+)
+# график: size vs avg_F
+```
+
+3. `avg_changes` vs λ для разных уровней шума:
+
+- Группировка:
+
+```python
+df_changes_lambda = (
+    df_results
+    .groupby(["noise","lambda","method"], as_index=False)["avg_changes"]
+    .mean()
+)
+```
+
+- Для каждого `noise_id` строится график `lambda` vs `avg_changes` с кривыми по методам.[172]
+- Акцент: при больших λ число изменений уменьшается, особенно у `reopt_simple` и `reopt_bootstrap`.[172]
+
+4. Компромисс «устойчивость–качество»:
+
+- Scatter `(avg_changes, avg_F)` для всех сценариев, цветом по методам, маркерами по методам (например: круг — full, квадрат — reopt_simple, ромб — reopt_bootstrap).[172]
+
+Комментарии:
+
+- В текстовых подписях отметить, что увеличение λ сдвигает решения в сторону большей устойчивости (меньше изменений), но может несколько ухудшать динамический функционал, как описано в разделе про влияние штрафа λ.[172]
+
+***
+
+## Блок 9. Связь \(|E_{\text{crit}}|\), времени и сложность; итоговые таблицы и выводы
+
+### Ячейка 30. Связь \(|E_{\text{crit}}|\), времени и λ (оценка сложности)
+
+Цель — эмпирически подтвердить, что среднее время шага примерно пропорционально размеру критичного подграфа \(|E_{\text{crit}}|\), и показать влияние шума и λ. [172]
+
+Содержимое:
+
+1. `avg_Ecrit` vs уровень шума и метод:
+
+```python
+df_Ecrit_noise = (
+    df_results
+    .groupby(["noise","method"], as_index=False)["avg_Ecrit"]
+    .mean()
+)
+# график: noise vs avg_Ecrit для трех методов
+```
+
+2. `avg_Ecrit` vs λ для реоптимизационных методов:
+
+```python
+df_Ecrit_lambda = (
+    df_results
+    .groupby(["lambda","method"], as_index=False)["avg_Ecrit"]
+    .mean()
+)
+# график: lambda vs avg_Ecrit (только "reopt_simple" и "reopt_bootstrap")
+```
+
+3. Связь `avg_Ecrit` и `avg_time`:
+
+- Scatter `avg_Ecrit` vs `avg_time` для `reopt_simple` и `reopt_bootstrap`.[172]
+- При наличии дополнительных метрик:
+  - Scatter `avg_Ecrit` vs `avg_aug_calls`,
+  - График `avg_time / avg_Ecrit` vs `size`.[172]
+
+Комментарии:
+
+- В текстовых подписях отметить, что при локальных изменениях (малый `avg_Ecrit`) время шага заметно ниже, и благодаря бутстрэппингу средняя сложность шага приближается к линейной по \(|E_{\text{crit}}|\), как обсуждается в разделе про оценку сложности. [172]
+
+***
+
+### Ячейка 31. Итоговые агрегированные таблицы (в стиле Таблицы 1)
+
+Цель — собрать компактную таблицу для статьи, где по размеру задачи, диапазону доли критичных дуг и методу показаны среднее время и показатели качества/устойчивости.[172]
+
+Содержимое:
+
+1. Квантование доли критичных дуг:
+
+```python
+bins = [0.0, 0.05, 0.10, 0.20, 1.01]
+labels = ["[0,0.05]","(0.05,0.10]","(0.10,0.20]","(0.20,1.0]"]
+df_results["crit_ratio_bin"] = pd.cut(
+    df_results["avg_crit_ratio"],
+    bins=bins,
+    labels=labels,
+    include_lowest=True,
+)
+```
+
+2. Агрегация:
+
+```python
+table_agg = (
+    df_results
+    .groupby(["size","crit_ratio_bin","method"], as_index=False)
+    .agg(
+        mean_time=("avg_time","mean"),
+        mean_cost=("avg_cost","mean"),
+        mean_F=("avg_F","mean"),
+        mean_changes=("avg_changes","mean"),
+    )
+    .sort_values(["size","crit_ratio_bin","method"])
+)
+```
+
+3. Печать части таблицы:
+
+- `print(table_agg.head(20))` или фильтрация для конкретных интересующих комбинаций.[172]
+
+4. Подготовка таблицы для статьи:
+
+- `table_for_paper = table_agg[...]` — выбор нужных строк (например, только `crit_ratio_bin` до 0.10 и `size` 50/200/500), форматирование чисел.[172]
+- Опционально: экспорт в CSV/LaTeX.
+
+***
+
+### Ячейка 32. Черновые текстовые выводы по экспериментам
+
+Цель — автоматически сгенерировать короткие текстовые выводы, которые затем можно перенести в раздел «Результаты и обсуждение».[172]
+
+Содержимое:
+
+1. Усреднение по методам:
+
+```python
+time_by_method = (
+    df_results.groupby("method", as_index=False)["avg_time"].mean()
+    .sort_values("avg_time")
+)
+F_by_method = (
+    df_results.groupby("method", as_index=False)["avg_F"].mean()
+    .sort_values("avg_F")
+)
+changes_by_method = (
+    df_results.groupby("method", as_index=False)["avg_changes"].mean()
+    .sort_values("avg_changes")
+)
+```
+
+2. Печать этих трёх табличек.
+
+3. Вывод текстовых тезисов:
+
+- например:
+
+```python
+print(
+"- В среднем метод 'reopt_bootstrap' обеспечивает наименьшее среднее время решения "
+"по сравнению с 'full' и 'reopt_simple', особенно при средних и крупных размерах задач."
+)
+print(
+"- Метод 'reopt_simple' даёт выигрыши по времени по сравнению с полным пересчётом, "
+"но уступает 'reopt_bootstrap' при высоких уровнях шума и больших размерах."
+)
+print(
+"- По базовой цели avg_cost метод 'full' выступает эталоном, тогда как реоптимизационные "
+"методы демонстрируют сопоставимое качество при меньшем среднем числе изменений avg_changes."
+)
+```
+
+Комментарии:
+
+- Содержательно эти тезисы должны совпадать с тем, что говорится в текстовом экспериментальном разделе о сравнении методов, компромиссе между устойчивостью и качеством и выгоде бутстрэппинга.[172]
+
+***
+
+### Ячейка 33. Сохранение результатов и графиков
+
+Опциональная, но полезная ячейка для воспроизводимости:
+
+- Сохранение:
+
+```python
+df_results.to_csv("dynamic_assignment_results.csv", index=False)
+table_for_paper.to_csv("table1_aggregated_results.csv", index=False)
+# сохранение ключевых графиков:
+# plt.savefig("time_vs_size.png"), plt.savefig("stability_vs_lambda.png"), ...
+```
+
+- Краткая текстовая заметка о том, какие файлы использовать при верстке статьи (таблицы, рисунки).[172]
+
+***
+
+### Ячейка 34. Текстовое заключение (markdown)
+
+Небольшой текстовый блок (без кода), который суммирует результаты:
+
+- Подтверждение:
+  - эффективность локальной реоптимизации с интервалами устойчивости;
+  - выигрыш от бутстрэппинга и предопределённых структур;
+  - влияние λ на устойчивость и качество.[172]
+- Обсуждение ограничений (случаи, когда \(E_{\text{crit}}\) велико, динамика турбулентна, и выигрыш снижается).[172]
+- Намётки для будущей работы (расширение моделей шума, более сложные шаблоны, интеграция с ML/RL).[172]
+
+Эта третья часть полностью закрывает экспериментальный раздел и обсуждение вычислительной сложности из черновика: постановку сценариев, сравнение базовых и предложенного методов, анализ времени и качества, а также выводы о роли параметров \(\lambda\) и \(|E_{\text{crit}}|\) в динамической задаче о назначениях. [172]

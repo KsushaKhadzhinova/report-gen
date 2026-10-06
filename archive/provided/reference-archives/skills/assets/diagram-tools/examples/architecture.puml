@@ -1,0 +1,42 @@
+@startuml
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam component {
+  BackgroundColor #DCE9F7
+  BorderColor #2C5F8D
+}
+skinparam database {
+  BackgroundColor #E8F5E9
+  BorderColor #3C7D40
+}
+skinparam node {
+  BackgroundColor #FAFAFA
+  BorderColor #888888
+}
+
+cloud "Telegram" as TG
+cloud "Kufar API" as KUFAR
+
+node "Сервер (Docker Compose)" {
+  component "bot\naiogram, без БД" as BOT
+  component "api\nFastAPI + планировщик" as API
+  database "db\nPostgreSQL 16" as DB
+  component "backup\npg_dump" as BACKUP
+  component "watcher\nсобытия Docker" as WATCH
+  component "socket-proxy\nтолько чтение событий" as PROXY
+  component "mailpit\nдемо-почтовый ящик" as MAIL
+}
+
+TG <--> BOT : long polling
+BOT --> API : HTTP, X-API-Key
+API --> DB : SQL-запросы (asyncpg)
+API --> KUFAR : HTTPS, рейт-лимит
+API --> TG : уведомления
+API --> MAIL : SMTP: коды, копии,\nотчёты (или внешний SMTP)
+BACKUP --> DB : дамп по расписанию
+WATCH --> PROXY
+WATCH --> TG : оповещения админу
+@enduml
