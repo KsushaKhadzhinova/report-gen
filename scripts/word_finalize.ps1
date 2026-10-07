@@ -64,7 +64,11 @@ function Split-OneTable($document) {
             $splitAt = Get-FirstRowOnNextPage $table
             if ($null -eq $number -or $splitAt -lt 3) { continue }
             $headerTexts = @()
-            foreach ($cell in $table.Rows.Item(1).Cells) { $headerTexts += $cell.Range.Text.TrimEnd([char]13, [char]7) }
+            $headerItalic = @()
+            foreach ($cell in $table.Rows.Item(1).Cells) {
+                $headerTexts += $cell.Range.Text.TrimEnd([char]13, [char]7)
+                $headerItalic += $cell.Range.Font.Italic
+            }
             $table.Split($splitAt)
             $next = $document.Tables.Item($index + 1)
             $gap = $next.Range.Paragraphs.Item(1).Previous(1)
@@ -78,9 +82,9 @@ function Split-OneTable($document) {
             $header = $next.Rows.Add($next.Rows.Item(1))
             for ($column = 1; $column -le $header.Cells.Count -and $column -le $headerTexts.Count; $column++) {
                 $header.Cells.Item($column).Range.Text = $headerTexts[$column - 1]
+                if ($headerItalic[$column - 1] -eq 0 -or $headerItalic[$column - 1] -eq -1) { $header.Cells.Item($column).Range.Font.Italic = $headerItalic[$column - 1] }
             }
             $header.HeadingFormat = -1
-            $header.Range.Font.Italic = 0
             $header.Range.ParagraphFormat.KeepWithNext = -1
             return $true
         }

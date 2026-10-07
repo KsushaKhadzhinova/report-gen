@@ -14,9 +14,9 @@ from reportgen.domain.citations import CITATION_RE, parse_numbers
 from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
 from reportgen.infrastructure.docx_objects import (
-    count_wrong_italics,
     count_objects_without_reference,
     count_objects_without_text,
+    count_wrong_italics,
     figure_image,
     fix_all_objects,
     objects_needing_notes,

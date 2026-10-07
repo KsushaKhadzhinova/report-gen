@@ -105,7 +105,7 @@ def test_unwanted_source_is_dropped_and_the_rest_renumbered(tmp_path: Path):
     DocxFormatService().fix(build_source(tmp_path), output, FixOptions(drop_sources=("Иванов",)))
     texts = [p.text for p in Document(str(output)).paragraphs]
     assert not any("Иванов" in text for text in texts)
-    assert next(text for text in texts if "Петров" in text).startswith("1 Петров")
+    assert next(text for text in texts if "Петров" in text).startswith("[1] Петров")
 
 
 def test_table_caption_has_a_blank_line_before_and_the_text_after_the_table_too(tmp_path: Path):
@@ -138,9 +138,9 @@ def test_sources_have_no_intro_dashes_or_italics_and_are_numbered(tmp_path: Path
     assert "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ" in texts
     assert not any("следующие" in text for text in texts)
     first = find(document, "Иванов")
-    assert first.text.startswith("1 Иванов")
+    assert first.text.startswith("[1] Иванов")
     assert all(run.italic is False for run in first.runs)
-    assert find(document, "Петров").text.startswith("2 Петров")
+    assert find(document, "Петров").text.startswith("[2] Петров")
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     assert first.alignment == WD_ALIGN_PARAGRAPH.LEFT

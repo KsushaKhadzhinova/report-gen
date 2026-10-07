@@ -581,7 +581,7 @@ def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int,
         for index, text in enumerate(produced):
             if index:
                 current = _insert_copy_after(current)
-            _set_text(current, f"{next_number + index} {breakable_urls(text)}")
+            _set_text(current, f"[{next_number + index}] {breakable_urls(text)}")
             _style_entry(current)
         mapping[text_number] = tuple(range(next_number, next_number + len(produced)))
         next_number += len(produced)
@@ -738,7 +738,7 @@ LIST_MARK_RE = re.compile(r"^[–—\-•]\s+")
 
 
 def fix_numbered_lists(document) -> int:
-    """Перечисления с тире или маркером заменяются нумерованным списком с цифрами: «1) …»; нумерация идёт заново в каждом списке."""
+    """Перечисления с тире или маркером заменяются нумерованным списком с цифрами без скобки и точки: «1 …»; нумерация идёт заново в каждом списке."""
     fixed = number = 0
     started = False
     for paragraph in document.paragraphs:
@@ -753,7 +753,7 @@ def fix_numbered_lists(document) -> int:
         number += 1
         run = next((run for run in paragraph.runs if run.text), None)
         if run is not None and LIST_MARK_RE.match(run.text):
-            run.text = LIST_MARK_RE.sub(f"{number}) ", run.text, count=1)
+            run.text = LIST_MARK_RE.sub(f"{number} ", run.text, count=1)
             fixed += 1
     return fixed
 

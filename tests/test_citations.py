@@ -51,10 +51,10 @@ def test_sources_are_rebuilt_and_in_text_citations_follow(tmp_path):
     texts = [p.text for p in Document(str(output)).paragraphs]
     body = next(t for t in texts if t.startswith("Текст со ссылками"))
     assert body == "Текст со ссылками на методики и на данные [1–3]."
-    entries = [t for t in texts if t[:2] in ("1 ", "2 ", "3 ")]
+    entries = [t for t in texts if t[:3] in ("[1]", "[2]", "[3]")]
     assert len(entries) == 3
-    assert entries[0] == "1 Similarweb Pro [Электронный ресурс] : обзор. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
-    assert entries[1].startswith("2 plantuml.com") and entries[2].startswith("3 mermaid.ai")
+    assert entries[0] == "[1] Similarweb Pro [Электронный ресурс] : обзор. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
+    assert entries[1].startswith("[2] plantuml.com") and entries[2].startswith("[3] mermaid.ai")
 
 
 def test_audit_reports_citations_without_a_source(tmp_path):

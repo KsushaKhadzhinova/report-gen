@@ -178,6 +178,8 @@ report-gen fix report.docx --output report.fixed.docx    # привести к �
 report-gen fix report.docx --remarks remarks.txt         # плюс разбор замечаний руководителя в report.fixed.review.md
 ```
 
+Абзацы после таблиц и рисунков: `report-gen notes <отчет.docx> --output todo.json --images-dir images` выгружает данные объектов, абзацы пишет автор, `python scripts/check_notes.py <абзацы.json> <todo.json>` проверяет их, `report-gen fix ... --notes абзацы.json` вставляет. Пакетная сборка восьми отчетов по NotaCode и все правила владелицы: `docs/ИНСТРУКЦИЯ_СБОРКА_ОТЧЕТОВ.md`.
+
 `fix` по умолчанию меняет только оформление. Переписывание абзацев, совпадающих с эталонами, включается флагом `--reference <папка>`.
 
 ### Эталоны для проверки совпадений

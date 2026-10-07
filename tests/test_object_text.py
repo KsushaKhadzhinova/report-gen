@@ -192,7 +192,7 @@ def test_dash_lists_become_numbered_lists_that_restart_in_each_list(tmp_path: Pa
     path = tmp_path / "lists.docx"
     document.save(path)
     texts = fixed_texts(path, tmp_path)
-    assert texts[1:] == ["Первый список:", "1) Альфа;", "2) Бета.", "Второй список:", "1) Гамма."]
+    assert texts[1:] == ["Первый список:", "1 Альфа;", "2 Бета.", "Второй список:", "1 Гамма."]
 
 
 def test_urls_in_sources_can_wrap_without_stretching_the_line():
