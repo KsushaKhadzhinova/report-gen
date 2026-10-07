@@ -156,3 +156,37 @@ def test_centered_appendix_heading_of_any_level_passes_the_audit(tmp_path: Path)
     output = tmp_path / "appendix_heading_fixed.docx"
     DocxFormatService().fix(path, output)
     assert not [i for i in DocxFormatService().audit(output) if "выравниванием" in i.message]
+
+
+def test_table_split_by_word_counts_text_after_the_last_part(tmp_path: Path):
+    document = Document()
+    document.add_heading("Раздел", level=1)
+    document.add_paragraph(REFERENCED)
+    document.add_paragraph("Таблица 1 – Длинная таблица")
+    document.add_table(rows=2, cols=1)
+    document.add_paragraph("Продолжение таблицы 1")
+    document.add_table(rows=2, cols=1)
+    document.add_paragraph(BODY)
+    assert count_objects_without_text(document) == 0
+    assert count_objects_without_reference(document) == 0
+
+
+def test_dash_lists_become_numbered_lists_that_restart_in_each_list(tmp_path: Path):
+    document = Document()
+    document.add_heading("Раздел", level=1)
+    for text in ("Первый список:", "– Альфа;", "– Бета.", "Второй список:", "– Гамма."):
+        document.add_paragraph(text)
+    path = tmp_path / "lists.docx"
+    document.save(path)
+    texts = fixed_texts(path, tmp_path)
+    assert texts[1:] == ["Первый список:", "1) Альфа;", "2) Бета.", "Второй список:", "1) Гамма."]
+
+
+def test_urls_in_sources_can_wrap_without_stretching_the_line():
+    from reportgen.infrastructure.docx_objects import ZERO_WIDTH_SPACE, breakable_urls
+
+    text = "Режим доступа: https://www.belstat.gov.by/upload/iblock/6af/a-b.pdf. – Дата"
+    wrapped = breakable_urls(text)
+    assert wrapped.replace(ZERO_WIDTH_SPACE, "") == text
+    assert "/" + ZERO_WIDTH_SPACE + "upload" in wrapped and "a-" + ZERO_WIDTH_SPACE + "b" in wrapped
+    assert breakable_urls(wrapped) == wrapped

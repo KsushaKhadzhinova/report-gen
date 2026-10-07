@@ -268,6 +268,11 @@ def _is_blank(item) -> bool:
 CONTINUATION_RE = re.compile(r"^Продолжение таблицы\s")
 
 
+def _is_continuation(item) -> bool:
+    """«Продолжение таблицы N» между частями длинной таблицы, которые Word делит по страницам."""
+    return isinstance(item, Paragraph) and CONTINUATION_RE.match(item.text.strip()) is not None
+
+
 def _is_caption(item) -> bool:
     return isinstance(item, Paragraph) and bool(TABLE_CAPTION_RE.match(item.text.strip()) or FIGURE_CAPTION_RE.match(item.text.strip()))
 
@@ -310,7 +315,10 @@ def _find_objects(items: list) -> list[_Object]:
         table_match = TABLE_RE.match(text) if not CONTINUATION_RE.match(text) else None
         figure_match = FIGURE_RE.match(text)
         if table_match and index + 1 < len(items) and isinstance(items[index + 1], Table):
-            found.append(_Object("table", table_match["number"], text, index, index + 1, table=items[index + 1]))
+            last = index + 1
+            while last + 2 < len(items) and _is_continuation(items[last + 1]) and isinstance(items[last + 2], Table):
+                last += 2
+            found.append(_Object("table", table_match["number"], text, index, last, table=items[index + 1]))
         elif figure_match:
             before = items[index - 1] if index else None
             picture = before if isinstance(before, Paragraph) and _has_picture(before) else None
@@ -540,6 +548,20 @@ def _style_entry(paragraph: Paragraph) -> None:
     paragraph.paragraph_format.right_indent = Cm(0)
 
 
+ZERO_WIDTH_SPACE = "​"
+URL_RE = re.compile(r"https?://[^\s​]+")
+
+
+def breakable_urls(text: str) -> str:
+    """В адресах после «/», «-», «_», «?», «&», «=» в пути допускается перенос строки: так выравнивание по ширине не растягивает строку."""
+
+    def split(match: re.Match[str]) -> str:
+        host, path = re.match(r"(https?://[^/]+)(.*)", match.group(), re.DOTALL).groups()
+        return host + re.sub(r"([/\-_?&=])(?=[^/])", lambda m: m.group(1) + ZERO_WIDTH_SPACE, path)
+
+    return URL_RE.sub(split, text.replace(ZERO_WIDTH_SPACE, ""))
+
+
 def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int, tuple[int, ...]]:
     """Приводит записи к виду ВАК, нумерует по порядку и возвращает соответствие старых номеров в тексте новым."""
     unwanted = [re.compile(pattern, re.IGNORECASE) for pattern in options.drop_sources]
@@ -556,7 +578,7 @@ def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int,
         for index, text in enumerate(produced):
             if index:
                 current = _insert_copy_after(current)
-            _set_text(current, f"{next_number + index} {text}")
+            _set_text(current, f"{next_number + index} {breakable_urls(text)}")
             _style_entry(current)
         mapping[text_number] = tuple(range(next_number, next_number + len(produced)))
         next_number += len(produced)
@@ -626,7 +648,7 @@ def fix_sources_list(document, options: FixOptions = FixOptions()) -> int:
 
 LATIN_SPAN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:(?:://|[._\-/'’+&#]+)[A-Za-z0-9]+| [A-Za-z][A-Za-z0-9]*)*")
 LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
-TEXT_ONLY_CHILDREN = {qn("w:rPr"), qn("w:t")}
+TEXT_ONLY_CHILDREN = {qn("w:rPr"), qn("w:t"), qn("w:lastRenderedPageBreak")}
 
 
 def _is_italic(paragraph: Paragraph, run: Run) -> bool:
@@ -666,6 +688,8 @@ def _split_run_by_script(paragraph: Paragraph, run: Run) -> int:
         return 0
     for text, is_latin in segments:
         clone = copy.deepcopy(run._r)
+        for marker in clone.findall(qn("w:lastRenderedPageBreak")):
+            clone.remove(marker)
         run._r.addprevious(clone)
         piece = Run(clone, paragraph)
         piece.text = text
@@ -687,6 +711,30 @@ def fix_italics(document) -> int:
             run = Run(element, paragraph)
             if run.text and _is_italic(paragraph, run):
                 fixed += _split_run_by_script(paragraph, run)
+    return fixed
+
+
+LIST_MARK_RE = re.compile(r"^[–—\-•]\s+")
+
+
+def fix_numbered_lists(document) -> int:
+    """Перечисления с тире или маркером заменяются нумерованным списком с цифрами: «1) …»; нумерация идёт заново в каждом списке."""
+    fixed = number = 0
+    started = False
+    for paragraph in document.paragraphs:
+        text = paragraph.text
+        name = paragraph.style.name
+        started = started or (name.startswith("Heading") and bool(text.strip()))
+        if not text.strip():
+            continue
+        if not started or name.startswith(SKIPPED_STYLE_PREFIXES) or not LIST_MARK_RE.match(text):
+            number = 0
+            continue
+        number += 1
+        run = next((run for run in paragraph.runs if run.text), None)
+        if run is not None and LIST_MARK_RE.match(run.text):
+            run.text = LIST_MARK_RE.sub(f"{number}) ", run.text, count=1)
+            fixed += 1
     return fixed
 
 
@@ -749,6 +797,7 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
         + fix_objects(document)
         + fix_appendix_headings(document)
         + fix_sources_list(document, options)
+        + fix_numbered_lists(document)
         + fix_italics(document)
         + fix_body_indents(document)
     )

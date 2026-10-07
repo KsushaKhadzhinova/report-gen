@@ -80,6 +80,7 @@ function Split-OneTable($document) {
                 $header.Cells.Item($column).Range.Text = $headerTexts[$column - 1]
             }
             $header.HeadingFormat = -1
+            $header.Range.Font.Italic = 0
             $header.Range.ParagraphFormat.KeepWithNext = -1
             return $true
         }
