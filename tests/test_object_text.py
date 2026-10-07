@@ -107,6 +107,19 @@ def test_italics_only_for_latin_and_cyrillic_next_to_it_is_upright(tmp_path: Pat
     assert all(run.italic is False for run in runs if not run.italic)
 
 
+def test_latin_in_a_regular_run_becomes_italic_and_cyrillic_stays_upright(tmp_path: Path):
+    document = Document()
+    document.add_heading("Раздел", level=1)
+    document.add_paragraph("Домен miro.com лидирует, Semrush и Google Trends подтверждают.")
+    path = tmp_path / "latin.docx"
+    document.save(path)
+    output = tmp_path / "latin_fixed.docx"
+    DocxFormatService().fix(path, output)
+    runs = [run for run in Document(output).paragraphs[1].runs if run.text]
+    assert {run.text for run in runs if run.italic} == {"miro.com", "Semrush", "Google Trends"}
+    assert not [i for i in DocxFormatService().audit(output) if "курсив" in i.message]
+
+
 def test_list_and_quote_paragraphs_have_no_side_indents(tmp_path: Path):
     document = Document()
     document.add_heading("Раздел", level=1)

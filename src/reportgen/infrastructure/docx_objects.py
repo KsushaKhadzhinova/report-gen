@@ -29,7 +29,8 @@ from reportgen.domain.sources import vak_entries
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
 TABLE_FONT_PT = 12
-KEEP_TOGETHER_MAX_ROWS = 12
+KEEP_TOGETHER_MAX_ROWS = 4
+KEEP_WITH_CAPTION_ROWS = 2
 TEXT_WIDTH_CM = 21.0 - standard.MARGIN_LEFT_MM / 10 - standard.MARGIN_RIGHT_MM / 10
 CHAR_WIDTH_CM = 0.25
 CELL_PADDING_CM = 0.45
@@ -228,11 +229,11 @@ def _mark_header_and_keep_rows(table: Table) -> None:
             properties.append(OxmlElement("w:cantSplit"))
         if index == 0 and properties.find(qn("w:tblHeader")) is None:
             properties.append(OxmlElement("w:tblHeader"))
-    if len(rows) <= KEEP_TOGETHER_MAX_ROWS:
-        for row in rows[:-1]:
-            for cell in row.cells:
-                for paragraph in cell.paragraphs:
-                    paragraph.paragraph_format.keep_with_next = True
+    kept = rows[:-1] if len(rows) <= KEEP_TOGETHER_MAX_ROWS else rows[:KEEP_WITH_CAPTION_ROWS]
+    for row in kept:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.keep_with_next = True
 
 
 def fix_objects(document) -> int:
@@ -478,7 +479,9 @@ def fix_text_around_objects(document, options: FixOptions = FixOptions()) -> int
             previous = items[obj.first - 1] if obj.first else None
             gap = Pt(0) if previous is None or _is_plain_text(previous) or _is_heading(previous) else BLANK_LINE
             if sentence:
-                _element(items[obj.first]).addprevious(_new_paragraph(document, sentence, gap)._p)
+                reference = _new_paragraph(document, sentence, gap)
+                reference.paragraph_format.keep_with_next = True
+                _element(items[obj.first]).addprevious(reference._p)
                 added += 1
         if not _has_text_after(items, obj):
             note = options.notes.get(_object_key(document, obj), "").strip()
@@ -691,12 +694,15 @@ def _latin_segments(text: str) -> list[tuple[str, bool]]:
     return segments
 
 
-def _split_run_by_script(paragraph: Paragraph, run: Run) -> int:
+def _restyle_run(paragraph: Paragraph, run: Run) -> int:
+    """Латиница в курсиве, всё остальное (кириллица, цифры, знаки, пробелы) прямым шрифтом; рядом с латиницей тоже."""
     segments = _latin_segments(run.text)
-    if all(is_latin for _, is_latin in segments):
-        return 0
-    if not LATIN_LETTER_RE.search(run.text):
-        run.italic = False
+    kinds = {is_latin for _, is_latin in segments}
+    if len(kinds) == 1:
+        wanted = segments[0][1]
+        if _is_italic(paragraph, run) == wanted:
+            return 0
+        run.italic = wanted
         return 1
     if {child.tag for child in run._r} - TEXT_ONLY_CHILDREN:
         return 0
@@ -718,13 +724,13 @@ def _document_paragraphs(document) -> list[Paragraph]:
 
 
 def fix_italics(document) -> int:
-    """Курсивом набирается только латиница: кириллица, цифры, знаки препинания и пробелы остаются прямыми, в том числе рядом с латиницей."""
+    """Курсивом набирается вся латиница и только она: кириллица, цифры, знаки препинания и пробелы остаются прямыми, в том числе рядом с латиницей."""
     fixed = 0
     for paragraph in _document_paragraphs(document):
         for element in paragraph._p.xpath(".//w:r"):
             run = Run(element, paragraph)
-            if run.text and _is_italic(paragraph, run):
-                fixed += _split_run_by_script(paragraph, run)
+            if run.text.strip():
+                fixed += _restyle_run(paragraph, run)
     return fixed
 
 
@@ -752,14 +758,17 @@ def fix_numbered_lists(document) -> int:
     return fixed
 
 
-def count_non_latin_italic(document) -> int:
-    """Фрагменты курсивом, в которых есть что-то кроме латиницы: кириллица, цифры, знаки препинания."""
+def count_wrong_italics(document) -> int:
+    """Фрагменты, в которых курсив не совпадает с латиницей: латиница прямым шрифтом или кириллица, цифры и знаки курсивом."""
     count = 0
     for paragraph in _document_paragraphs(document):
         for element in paragraph._p.xpath(".//w:r"):
             run = Run(element, paragraph)
-            if run.text.strip() and _is_italic(paragraph, run) and not all(is_latin for _, is_latin in _latin_segments(run.text.strip())):
-                count += 1
+            if not run.text.strip():
+                continue
+            italic = _is_italic(paragraph, run)
+            segments = [(text, is_latin) for text, is_latin in _latin_segments(run.text.strip()) if text.strip()]
+            count += any(is_latin != italic for _, is_latin in segments)
     return count
 
 

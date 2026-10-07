@@ -14,7 +14,7 @@ from reportgen.domain.citations import CITATION_RE, parse_numbers
 from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
 from reportgen.infrastructure.docx_objects import (
-    count_non_latin_italic,
+    count_wrong_italics,
     count_objects_without_reference,
     count_objects_without_text,
     figure_image,
@@ -183,7 +183,7 @@ class DocxFormatService:
             "абзацев с абзацным отступом не 1,25 см": sum(_has_wrong_indent(p) for p in body),
             "абзацев не по ширине": sum(_alignment(p) != WD_ALIGN_PARAGRAPH.JUSTIFY for p in body),
             "абзацев с отступом слева или справа": sum(_has_side_indent(p) for p in body),
-            "фрагментов курсивом не из латиницы": count_non_latin_italic(document),
+            "фрагментов, где курсив не совпадает с латиницей": count_wrong_italics(document),
         }
         counts["заголовков с неверным выравниванием"] = sum(_heading_alignment_is_wrong(p) for p in document.paragraphs if _is_heading(p))
         counts["подписей таблиц не по левому краю"] = sum(
