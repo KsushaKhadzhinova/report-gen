@@ -16,6 +16,7 @@ $wdExportFormatPDF = 17
 $wdStatisticPages = 2
 $wdActiveEndPageNumber = 3
 $MaxSplits = 300
+$wdActiveEndPageNumberCaption = 3
 $script:Failed = @{}
 
 $continuationText = [regex]::Unescape('\u041f\u0440\u043e\u0434\u043e\u043b\u0436\u0435\u043d\u0438\u0435 \u0442\u0430\u0431\u043b\u0438\u0446\u044b')
@@ -37,6 +38,22 @@ function Get-FirstRowOnNextPage($table) {
     return 0
 }
 
+function Keep-CaptionsWithTables($document) {
+    foreach ($table in $document.Tables) {
+        try {
+            $previous = $table.Range.Paragraphs.Item(1).Previous(1)
+            if ($null -eq $previous) { continue }
+            $text = $previous.Range.Text
+            if ($text -notmatch ('^(' + $continuationText + '|' + [regex]::Unescape('Таблица') + ')\s')) { continue }
+            $captionPage = $previous.Range.Information($wdActiveEndPageNumberCaption)
+            $dataRow = [Math]::Min(2, $table.Rows.Count)
+            $tablePage = $table.Rows.Item($dataRow).Range.Information($wdActiveEndPageNumberCaption)
+            if ($captionPage -ne $tablePage) { $previous.PageBreakBefore = -1 }
+        }
+        catch { }
+    }
+}
+
 function Split-OneTable($document) {
     for ($index = 1; $index -le $document.Tables.Count; $index++) {
         $table = $document.Tables.Item($index)
@@ -45,7 +62,7 @@ function Split-OneTable($document) {
         try {
             $number = Get-TableNumber $table
             $splitAt = Get-FirstRowOnNextPage $table
-            if ($null -eq $number -or $splitAt -lt 2) { continue }
+            if ($null -eq $number -or $splitAt -lt 3) { continue }
             $headerTexts = @()
             foreach ($cell in $table.Rows.Item(1).Cells) { $headerTexts += $cell.Range.Text.TrimEnd([char]13, [char]7) }
             $table.Split($splitAt)
@@ -83,6 +100,10 @@ try {
     while ($splits -lt $MaxSplits -and (Split-OneTable $document)) {
         $splits++
         $document.Repaginate()
+    }
+    foreach ($pass in 1..3) {
+        $document.Repaginate()
+        Keep-CaptionsWithTables $document
     }
     foreach ($contents in $document.TablesOfContents) { $contents.Update() }
     $document.Fields.Update() | Out-Null

@@ -15,9 +15,9 @@ def _lower_first(topic: str) -> str:
 
 def table_sentence(caption: str) -> str | None:
     match = TABLE_RE.match(caption.strip())
-    return f"В таблице {match['number']} приведено: {_lower_first(match['topic'])}." if match else None
+    return f"Данные по теме «{_lower_first(match['topic'])}» приведены в таблице {match['number']}." if match else None
 
 
 def figure_sentence(caption: str) -> str | None:
     match = FIGURE_RE.match(caption.strip())
-    return f"На рисунке {match['number']} показано: {_lower_first(match['topic'])}." if match else None
+    return f"Рисунок {match['number']} иллюстрирует тему «{_lower_first(match['topic'])}»." if match else None

@@ -32,6 +32,9 @@ LEADING_MARK_RE = re.compile(r"^\s*[–—\-•]\s*")
 FILLER_PHRASES = ("В данном подразделе рассматриваются ключевые аспекты",)
 HEADING_ENDS = ("Heading",)
 SOURCES_TITLE = "список использованных источников"
+APPENDIX_RE = re.compile(r"^ПРИЛОЖЕНИЕ\s+[А-ЯA-Z]\.?$", re.IGNORECASE)
+APPENDIX_STATUS_RE = re.compile(r"^\((обязательное|справочное|рекомендуемое)\)$", re.IGNORECASE)
+APPENDIX_TITLE_MAX_CHARS = 160
 
 
 def _paragraphs_and_tables(document):
@@ -310,6 +313,34 @@ def fix_text_after_objects(document) -> int:
     return added
 
 
+def _center(paragraph, bold_title: bool = False) -> None:
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    paragraph.paragraph_format.left_indent = Cm(0)
+    paragraph.paragraph_format.keep_with_next = True
+    if bold_title:
+        for run in paragraph.runs:
+            run.bold = True
+
+
+def fix_appendix_headings(document) -> int:
+    """Приложение: «ПРИЛОЖЕНИЕ А», ниже по центру статус в скобках, ещё ниже заголовок приложения по центру полужирным."""
+    paragraphs = [p for p in document.paragraphs if p.text.strip()]
+    fixed = 0
+    for index, paragraph in enumerate(paragraphs):
+        if not APPENDIX_RE.match(paragraph.text.strip()):
+            continue
+        _center(paragraph)
+        fixed += 1
+        following = paragraphs[index + 1 : index + 3]
+        if following and APPENDIX_STATUS_RE.match(following[0].text.strip()):
+            _center(following[0])
+            following = following[1:]
+        if following and len(following[0].text) <= APPENDIX_TITLE_MAX_CHARS and not _is_caption(following[0]):
+            _center(following[0], bold_title=True)
+    return fixed
+
+
 def _find_sources_heading(paragraphs: list[Paragraph]) -> int | None:
     return next((i for i, p in enumerate(paragraphs) if _is_heading(p) and p.text.strip().lower() == SOURCES_TITLE), None)
 
@@ -432,5 +463,6 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
         + fix_subsection_spacing(document)
         + fix_objects(document)
         + fix_text_after_objects(document)
+        + fix_appendix_headings(document)
         + fix_sources_list(document, options)
     )
