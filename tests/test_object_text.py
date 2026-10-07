@@ -190,3 +190,9 @@ def test_urls_in_sources_can_wrap_without_stretching_the_line():
     assert wrapped.replace(ZERO_WIDTH_SPACE, "") == text
     assert "/" + ZERO_WIDTH_SPACE + "upload" in wrapped and "a-" + ZERO_WIDTH_SPACE + "b" in wrapped
     assert breakable_urls(wrapped) == wrapped
+
+
+def test_parenthetical_tail_of_a_caption_is_not_repeated_in_the_reference_sentence():
+    caption = "Рисунок 2 – Визиты доменов с данными Semrush (логарифмическая шкала; в скобках доля)"
+    assert figure_reference_sentence(caption) == "Тема «визиты доменов с данными Semrush» показана на рисунке 2."
+    assert table_reference_sentence("Таблица 4 – (ЛР5)") == "Данные по теме «(ЛР5)» приведены в таблице 4."

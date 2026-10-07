@@ -20,6 +20,7 @@ from reportgen.infrastructure.docx_objects import (
     figure_image,
     fix_all_objects,
     objects_needing_notes,
+    sources_entries,
 )
 
 MIN_BODY_PARAGRAPH_CHARS = 80
@@ -174,7 +175,9 @@ class DocxFormatService:
         missing_reference = count_objects_without_reference(document)
         if missing_reference:
             issues.append(Issue("warning", path.name, f"без текста со ссылкой перед таблицей или рисунком: {missing_reference}"))
-        body = [p for p in document.paragraphs if _is_body(p)]
+        entries = sources_entries(document)
+        listed = {id(entry._p) for entry in entries}
+        body = [p for p in document.paragraphs if _is_body(p) and id(p._p) not in listed]
         counts = {
             "абзацев с другим шрифтом или размером": sum(_has_foreign_font(p) for p in body),
             "абзацев с абзацным отступом не 1,25 см": sum(_has_wrong_indent(p) for p in body),

@@ -18,8 +18,19 @@ FIGURE_REFERENCES = (
 )
 
 
+PARENTHESIS_TAIL_RE = re.compile(r"\s*\([^()]*\)\s*$")
+MIN_TOPIC_CHARS = 8
+
+
+def clean_topic(topic: str) -> str:
+    """Тема для предложения со ссылкой: без пояснения в скобках в конце подписи, если без него тема остаётся осмысленной."""
+    shortened = PARENTHESIS_TAIL_RE.sub("", topic)
+    return shortened if len(shortened) >= MIN_TOPIC_CHARS else topic
+
+
 def _lower_first(topic: str) -> str:
     """Первая буква строчная, кроме аббревиатур и имён с заглавной второй буквой."""
+    topic = clean_topic(topic)
     if len(topic) > 1 and topic[1].isupper():
         return topic
     return topic[:1].lower() + topic[1:]

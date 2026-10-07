@@ -141,6 +141,9 @@ def test_sources_have_no_intro_dashes_or_italics_and_are_numbered(tmp_path: Path
     assert first.text.startswith("1 Иванов")
     assert all(run.italic is False for run in first.runs)
     assert find(document, "Петров").text.startswith("2 Петров")
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    assert first.alignment == WD_ALIGN_PARAGRAPH.LEFT
 
 
 def test_column_widths_keep_short_columns_readable_and_fill_the_text_width():

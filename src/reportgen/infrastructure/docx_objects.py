@@ -542,7 +542,7 @@ def _insert_copy_after(paragraph: Paragraph) -> Paragraph:
 def _style_entry(paragraph: Paragraph) -> None:
     for run in paragraph.runs:
         run.italic = False
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
     paragraph.paragraph_format.left_indent = Cm(0)
     paragraph.paragraph_format.right_indent = Cm(0)
@@ -583,6 +583,20 @@ def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int,
         mapping[text_number] = tuple(range(next_number, next_number + len(produced)))
         next_number += len(produced)
     return mapping
+
+
+def sources_entries(document) -> list[Paragraph]:
+    """Записи всех списков использованных источников документа."""
+    paragraphs = _all_paragraphs(document)
+    entries: list[Paragraph] = []
+    for index, paragraph in enumerate(paragraphs):
+        if _is_heading(paragraph) and paragraph.text.strip().lower() == SOURCES_TITLE:
+            for entry in paragraphs[index + 1 :]:
+                if _is_heading(entry):
+                    break
+                if entry.text.strip():
+                    entries.append(entry)
+    return entries
 
 
 def _all_paragraphs(document) -> list[Paragraph]:
@@ -768,6 +782,8 @@ def fix_body_indents(document) -> int:
     """
     fixed = 0
     started = False
+    entries = sources_entries(document)  # ссылки держатся, пока цикл сравнивает элементы по id
+    source_entries = {id(entry._p) for entry in entries}
     for paragraph in document.paragraphs:
         text = paragraph.text.strip()
         name = paragraph.style.name
@@ -777,7 +793,7 @@ def fix_body_indents(document) -> int:
         if CONTINUATION_RE.match(text) or _is_centered(paragraph):
             continue
         fmt = paragraph.paragraph_format
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT if id(paragraph._p) in source_entries else WD_ALIGN_PARAGRAPH.JUSTIFY
         fmt.left_indent = Cm(0)
         fmt.right_indent = Cm(0)
         fmt.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
