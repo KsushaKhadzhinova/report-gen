@@ -13,12 +13,20 @@ from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.citations import CITATION_RE, parse_numbers
 from reportgen.domain.fix_options import FixOptions
 from reportgen.domain.lint_rules import Issue
-from reportgen.infrastructure.docx_objects import count_objects_without_text, fix_all_objects
+from reportgen.infrastructure.docx_objects import (
+    count_non_latin_italic,
+    count_objects_without_reference,
+    count_objects_without_text,
+    figure_image,
+    fix_all_objects,
+    objects_needing_notes,
+)
 
 MIN_BODY_PARAGRAPH_CHARS = 80
 MARGIN_TOLERANCE = Mm(1)
 TABLE_CAPTION_RE = re.compile(r"^Таблица\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 NUMBERED_TITLE_RE = re.compile(r"^\d+(\.\d+)*\s")
+APPENDIX_HEADING_RE = re.compile(r"^ПРИЛОЖЕНИЕ\s+[А-ЯA-Z]\b")
 CAPTION_RE = re.compile(r"^(Рисунок|Таблица|Листинг)\s+[\dА-Я]+(\.\d+)?\s*[–-]")
 INDENT_TOLERANCE = Cm(0.1)
 
@@ -60,12 +68,17 @@ def _has_wrong_indent(paragraph) -> bool:
     return indent is None or abs(indent - Cm(standard.PARAGRAPH_INDENT_CM)) > INDENT_TOLERANCE
 
 
+def _has_side_indent(paragraph) -> bool:
+    return any(abs(_inherited(paragraph, side) or 0) > INDENT_TOLERANCE for side in ("left_indent", "right_indent"))
+
+
 def _is_heading(paragraph) -> bool:
     return paragraph.style.name.startswith("Heading") and bool(paragraph.text.strip())
 
 
 def _heading_alignment_is_wrong(paragraph) -> bool:
-    centered_expected = paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None
+    appendix = APPENDIX_HEADING_RE.match(paragraph.text.strip()) is not None
+    centered_expected = appendix or (paragraph.style.name == "Heading 1" and NUMBERED_TITLE_RE.match(paragraph.text.strip()) is None)
     expected = WD_ALIGN_PARAGRAPH.CENTER if centered_expected else WD_ALIGN_PARAGRAPH.LEFT
     return _alignment(paragraph) != expected
 
@@ -158,11 +171,16 @@ class DocxFormatService:
         missing_text = count_objects_without_text(document)
         if missing_text:
             issues.append(Issue("warning", path.name, f"без текста после таблицы или рисунка: {missing_text}"))
+        missing_reference = count_objects_without_reference(document)
+        if missing_reference:
+            issues.append(Issue("warning", path.name, f"без текста со ссылкой перед таблицей или рисунком: {missing_reference}"))
         body = [p for p in document.paragraphs if _is_body(p)]
         counts = {
             "абзацев с другим шрифтом или размером": sum(_has_foreign_font(p) for p in body),
             "абзацев с абзацным отступом не 1,25 см": sum(_has_wrong_indent(p) for p in body),
             "абзацев не по ширине": sum(_alignment(p) != WD_ALIGN_PARAGRAPH.JUSTIFY for p in body),
+            "абзацев с отступом слева или справа": sum(_has_side_indent(p) for p in body),
+            "фрагментов курсивом не из латиницы": count_non_latin_italic(document),
         }
         counts["заголовков с неверным выравниванием"] = sum(_heading_alignment_is_wrong(p) for p in document.paragraphs if _is_heading(p))
         counts["подписей таблиц не по левому краю"] = sum(
@@ -185,6 +203,19 @@ class DocxFormatService:
 
     def open_text(self, path: Path) -> _DocxText:
         return _DocxText(path)
+
+    def notes_template(self, path: Path, images_dir: Path | None = None) -> list[dict]:
+        """Таблицы и рисунки, после которых нужен абзац: данные для автора, который пишет текст; файлы рисунков кладутся в images_dir."""
+        document = Document(str(path))
+        entries = objects_needing_notes(document)
+        if images_dir is not None:
+            images_dir.mkdir(parents=True, exist_ok=True)
+            for entry in entries:
+                image = figure_image(document, entry["key"]) if entry["kind"] == "figure" else None
+                if image:
+                    (images_dir / image[0]).write_bytes(image[1])
+                    entry["image"] = str(images_dir / image[0])
+        return entries
 
     @staticmethod
     def _fix_heading(paragraph) -> int:

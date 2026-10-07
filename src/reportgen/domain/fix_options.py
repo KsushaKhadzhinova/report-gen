@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -10,3 +10,4 @@ class FixOptions:
     drop_sources: tuple[str, ...] = ()
     citation_offset: int = 0
     drop_citations: tuple[int, ...] = ()
+    notes: dict[str, str] = field(default_factory=dict, hash=False, compare=False)

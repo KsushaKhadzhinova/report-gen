@@ -75,12 +75,24 @@ def test_filler_phrase_is_removed(tmp_path: Path):
 
 def test_site_entry_follows_the_vak_form():
     entry = "Similarweb Pro: обзор доменов [Электронный ресурс]. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
-    assert to_vak_site_entry(entry) == "Similarweb Pro : обзор доменов : [сайт]. – URL: https://pro.similarweb.com (дата обращения: 30.09.2026)."
+    assert to_vak_site_entry(entry) == (
+        "Similarweb Pro [Электронный ресурс] : обзор доменов. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
+    )
+
+
+def test_resource_mark_goes_after_the_title_proper_before_responsibility():
+    entry = "Образование, 2026 : стат. сб. / Нац. стат. ком. [Электронный ресурс]. – Режим доступа: https://www.belstat.gov.by. – Дата доступа: 30.09.2026."
+    assert to_vak_site_entry(entry).startswith("Образование, 2026 [Электронный ресурс] : стат. сб. / Нац. стат. ком. – Режим доступа:")
+
+
+def test_site_entry_without_subtitle_keeps_the_mark_at_the_end_of_the_title():
+    entry = "Miro Pricing [Электронный ресурс]. – Режим доступа: https://miro.com/pricing/. – Дата доступа: 30.09.2026."
+    assert to_vak_site_entry(entry) == entry
 
 
 def test_entry_with_url_path_and_slash_keeps_the_address():
     entry = "Sparx Systems: цены [Электронный ресурс]. – Режим доступа: https://sparxsystems.com/products/ea/. – Дата доступа: 02.10.2026."
-    assert "URL: https://sparxsystems.com/products/ea/ (дата обращения: 02.10.2026)." in to_vak_site_entry(entry)
+    assert "Режим доступа: https://sparxsystems.com/products/ea/. – Дата доступа: 02.10.2026." in to_vak_site_entry(entry)
 
 
 def test_entries_that_are_not_sites_are_left_alone():

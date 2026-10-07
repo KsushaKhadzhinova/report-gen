@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import json
 import os
 import sys
 from pathlib import Path
@@ -287,6 +288,23 @@ def cmd_overlap(args) -> int:
     return EXIT_PROBLEMS if report.matches else EXIT_OK
 
 
+def _read_notes(paths: list[str]) -> dict[str, str]:
+    """Абзацы после таблиц и рисунков: JSON со списком записей {key, text} или словарём ключ: текст."""
+    notes: dict[str, str] = {}
+    for path in paths:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        entries = data.items() if isinstance(data, dict) else ((entry["key"], entry.get("text", "")) for entry in data)
+        notes.update({key: text for key, text in entries if text.strip()})
+    return notes
+
+
+def cmd_notes(args) -> int:
+    entries = DocxFormatService().notes_template(Path(args.file), Path(args.images_dir) if args.images_dir else None)
+    Path(args.output).write_text(json.dumps(entries, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"Таблиц и рисунков без абзаца после них: {len(entries)}. Данные: {args.output}")
+    return EXIT_OK
+
+
 def cmd_fix(args) -> int:
     source = Path(args.file)
     output = Path(args.output) if args.output else source.with_name(f"{source.stem}.fixed.docx")
@@ -294,7 +312,10 @@ def cmd_fix(args) -> int:
     remarks = Path(args.remarks).read_text(encoding="utf-8") if args.remarks else ""
     model = OpenAICompatibleModel() if (library or remarks) else None
     result = ReportFixer(DocxFormatService(), load_prompt_catalog(), model, FileStyleStore(), library).fix(
-        source, output, remarks, FixOptions(tuple(args.drop_source), args.citation_offset, tuple(args.drop_citation))
+        source,
+        output,
+        remarks,
+        FixOptions(tuple(args.drop_source), args.citation_offset, tuple(args.drop_citation), _read_notes(args.notes)),
     )
     if result.review:
         output.with_suffix(".review.md").write_text(result.review, encoding="utf-8")
@@ -395,6 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--citation-offset", type=int, default=0, help="на сколько номера ссылок в тексте больше позиции записи в списке (если часть списка отсутствует)")
     fix.add_argument("--drop-citation", type=int, action="append", default=[], help="номер ссылки, которую нужно убрать из текста (можно несколько раз)")
     fix.add_argument("--reference")
+    fix.add_argument("--notes", action="append", default=[], help="JSON с абзацами, которые ставятся после таблиц и рисунков (можно несколько раз)")
+    notes = add("notes", cmd_notes, "Выгрузить таблицы и рисунки, после которых нужен абзац текста")
+    notes.add_argument("file")
+    notes.add_argument("--output", required=True)
+    notes.add_argument("--images-dir")
     build = add("build", cmd_build, "Собрать DOCX, TEX и PDF")
     build.add_argument("project")
     build.add_argument("--formats", default=",".join(ALL_FORMATS))

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
@@ -10,19 +11,28 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 from docx.table import Table
 from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.citations import CITATION_RE, parse_numbers, renumber
 from reportgen.domain.fix_options import FixOptions
-from reportgen.domain.object_sentences import figure_sentence, table_sentence
+from reportgen.domain.object_sentences import (
+    FIGURE_RE,
+    FIGURE_WORDS,
+    TABLE_RE,
+    TABLE_WORDS,
+    figure_reference_sentence,
+    reference_number_pattern,
+    table_reference_sentence,
+)
 from reportgen.domain.sources import vak_entries
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
 TABLE_FONT_PT = 12
 KEEP_TOGETHER_MAX_ROWS = 12
 TEXT_WIDTH_CM = 21.0 - standard.MARGIN_LEFT_MM / 10 - standard.MARGIN_RIGHT_MM / 10
-CHAR_WIDTH_CM = 0.22
-CELL_PADDING_CM = 0.4
+CHAR_WIDTH_CM = 0.25
+CELL_PADDING_CM = 0.45
 BREAKABLE_WORD_CHARS = 22
 MONTHS = "январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь"
 CITY_DATE_RE = re.compile(rf"^(Минск),?\s+(?:{MONTHS})\s+(\d{{4}})\s*$", re.IGNORECASE)
@@ -51,7 +61,7 @@ def _has_picture(paragraph) -> bool:
 
 
 def _is_heading(paragraph) -> bool:
-    return paragraph.style.name.startswith(HEADING_ENDS) and bool(paragraph.text.strip())
+    return isinstance(paragraph, Paragraph) and paragraph.style.name.startswith(HEADING_ENDS) and bool(paragraph.text.strip())
 
 
 def _set_text(paragraph, text: str) -> None:
@@ -152,6 +162,26 @@ def _column_texts(table: Table) -> list[list[str]]:
     return columns
 
 
+def _shrink_wide_columns(minimum: list[float], total: float) -> list[float]:
+    """Не хватает места: узкие столбцы (номера, даты, короткие слова) остаются целыми, сжимаются только широкие."""
+    widths = [0.0] * len(minimum)
+    remaining = list(range(len(minimum)))
+    space = total
+    while remaining:
+        share = space / len(remaining)
+        small = [index for index in remaining if minimum[index] <= share]
+        if not small:
+            scale = space / sum(minimum[index] for index in remaining)
+            for index in remaining:
+                widths[index] = minimum[index] * scale
+            break
+        for index in small:
+            widths[index] = minimum[index]
+            space -= minimum[index]
+            remaining.remove(index)
+    return widths
+
+
 def column_widths_cm(columns: list[list[str]], total: float = TEXT_WIDTH_CM) -> list[float]:
     """Ширины столбцов: минимум по самому длинному слову, остаток пропорционально объёму текста; очень длинные слова допускается переносить."""
     minimum, preferred = [], []
@@ -165,7 +195,7 @@ def column_widths_cm(columns: list[list[str]], total: float = TEXT_WIDTH_CM) -> 
         spare = total - sum(preferred)
         return [width + spare * width / sum(preferred) for width in preferred]
     if sum(minimum) >= total:
-        return [width * total / sum(minimum) for width in minimum]
+        return _shrink_wide_columns(minimum, total)
     room = total - sum(minimum)
     extra = [high - low for high, low in zip(preferred, minimum, strict=True)]
     return [low + room * share / sum(extra) for low, share in zip(minimum, extra, strict=True)]
@@ -235,81 +265,218 @@ def _is_blank(item) -> bool:
     return isinstance(item, Paragraph) and not item.text.strip() and not _has_picture(item)
 
 
+CONTINUATION_RE = re.compile(r"^Продолжение таблицы\s")
+
+
 def _is_caption(item) -> bool:
     return isinstance(item, Paragraph) and bool(TABLE_CAPTION_RE.match(item.text.strip()) or FIGURE_CAPTION_RE.match(item.text.strip()))
 
 
-def _lacks_text_after(items: list, index: int) -> bool:
-    """После таблицы или рисунка должен идти текст, а не заголовок, подпись другого объекта, таблица или конец документа."""
-    for item in items[index + 1 :]:
-        if _is_blank(item):
-            continue
-        return isinstance(item, Table) or _is_heading(item) or _is_caption(item) or _has_picture(item)
-    return True
+def _is_plain_text(item) -> bool:
+    """Обычный абзац текста: не заголовок, не подпись, не рисунок и не пустая строка."""
+    return (
+        isinstance(item, Paragraph)
+        and bool(item.text.strip())
+        and not _has_picture(item)
+        and not _is_heading(item)
+        and not _is_caption(item)
+        and CONTINUATION_RE.match(item.text.strip()) is None
+    )
 
 
-def _object_caption(items: list, index: int) -> str | None:
-    item = items[index]
-    if isinstance(item, Paragraph):
-        return item.text
-    for earlier in reversed(items[:index]):
-        if _is_blank(earlier):
-            continue
-        return earlier.text if isinstance(earlier, Paragraph) and TABLE_CAPTION_RE.match(earlier.text.strip()) else None
-    return None
+@dataclass(frozen=True)
+class _Object:
+    """Таблица или рисунок в списке содержимого без пустых строк: индексы первого и последнего элемента объекта."""
+
+    kind: str
+    number: str
+    caption: str
+    first: int
+    last: int
+    table: Table | None = None
+    picture: Paragraph | None = None
 
 
-def _objects_needing_text(items: list) -> list[tuple[int, str]]:
+def _content_items(document) -> list:
+    return [item for item in _paragraphs_and_tables(document) if not _is_blank(item)]
+
+
+def _find_objects(items: list) -> list[_Object]:
     found = []
     for index, item in enumerate(items):
-        is_table = isinstance(item, Table)
-        is_figure_caption = isinstance(item, Paragraph) and bool(FIGURE_CAPTION_RE.match(item.text.strip()))
-        if not (is_table or is_figure_caption) or not _lacks_text_after(items, index):
+        if not isinstance(item, Paragraph):
             continue
-        caption = _object_caption(items, index)
-        sentence = (table_sentence if is_table else figure_sentence)(caption or "")
-        if sentence:
-            found.append((index, sentence))
+        text = item.text.strip()
+        table_match = TABLE_RE.match(text) if not CONTINUATION_RE.match(text) else None
+        figure_match = FIGURE_RE.match(text)
+        if table_match and index + 1 < len(items) and isinstance(items[index + 1], Table):
+            found.append(_Object("table", table_match["number"], text, index, index + 1, table=items[index + 1]))
+        elif figure_match:
+            before = items[index - 1] if index else None
+            picture = before if isinstance(before, Paragraph) and _has_picture(before) else None
+            found.append(_Object("figure", figure_match["number"], text, index - 1 if picture is not None else index, index, picture=picture))
     return found
 
 
+def _has_reference(paragraph: Paragraph, obj: _Object) -> bool:
+    words = TABLE_WORDS if obj.kind == "table" else FIGURE_WORDS
+    return reference_number_pattern(obj.number, words).search(paragraph.text) is not None
+
+
+def _reference_state(items: list, obj: _Object) -> str:
+    """Перед объектом должен стоять текст со ссылкой на него: «ok», «colon» (абзац оканчивается двоеточием) или «missing»."""
+    previous = items[obj.first - 1] if obj.first else None
+    if not _is_plain_text(previous):
+        return "missing"
+    if _has_reference(previous, obj):
+        return "ok"
+    return "colon" if previous.text.rstrip().endswith(":") else "missing"
+
+
+def _has_text_after(items: list, obj: _Object) -> bool:
+    following = items[obj.last + 1] if obj.last + 1 < len(items) else None
+    return _is_plain_text(following)
+
+
 def count_objects_without_text(document) -> int:
-    return len(_objects_needing_text(list(_paragraphs_and_tables(document))))
+    """Таблицы и рисунки, после которых нет абзаца текста."""
+    items = _content_items(document)
+    return sum(not _has_text_after(items, obj) for obj in _find_objects(items))
 
 
-def _reference_paragraph(items: list, index: int) -> Paragraph | None:
+def count_objects_without_reference(document) -> int:
+    """Таблицы и рисунки, перед которыми нет текста со ссылкой на них."""
+    items = _content_items(document)
+    return sum(_reference_state(items, obj) != "ok" for obj in _find_objects(items))
+
+
+def _table_text(table: Table) -> str:
+    return "\x1f".join(cell.text for row in table.rows for cell in row.cells)
+
+
+def _image_blob(document, picture: Paragraph | None) -> bytes | None:
+    if picture is None:
+        return None
+    ids = picture._p.xpath(".//a:blip/@r:embed")
+    return document.part.related_parts[ids[0]].blob if ids else None
+
+
+def _object_key(document, obj: _Object) -> str:
+    """Ключ абзаца для объекта: подпись и отпечаток содержимого, чтобы одинаковые подписи разных объектов не путались."""
+    payload = _table_text(obj.table).encode() if obj.table is not None else (_image_blob(document, obj.picture) or obj.caption.encode())
+    return f"{obj.caption}|{hashlib.sha1(payload).hexdigest()[:10]}"
+
+
+def _heading_before(items: list, index: int) -> str:
     for earlier in reversed(items[:index]):
-        if isinstance(earlier, Paragraph) and len(earlier.text) > 60 and not _is_heading(earlier) and not _is_caption(earlier):
-            if earlier.alignment != WD_ALIGN_PARAGRAPH.CENTER:
-                return earlier
+        if _is_heading(earlier):
+            return earlier.text.strip()
+    return ""
+
+
+def _variants(objects: list[_Object]) -> dict[int, int]:
+    """Номер формулировки предложения со ссылкой: чередуется по порядку объектов одного вида."""
+    counters = {"table": 0, "figure": 0}
+    result = {}
+    for obj in objects:
+        result[obj.first] = counters[obj.kind]
+        counters[obj.kind] += 1
+    return result
+
+
+def _reference_sentence(obj: _Object, variant: int) -> str | None:
+    return (table_reference_sentence if obj.kind == "table" else figure_reference_sentence)(obj.caption, variant)
+
+
+def objects_needing_notes(document, cell_chars: int = 140, max_rows: int = 30) -> list[dict]:
+    """Объекты, после которых нужно дописать абзац: подпись, данные таблицы, окружающий текст; абзац пишется автором по этим данным."""
+    items = _content_items(document)
+    objects = _find_objects(items)
+    variants = _variants(objects)
+    needed = []
+    for obj in objects:
+        if _has_text_after(items, obj):
+            continue
+        previous = items[obj.first - 1] if obj.first else None
+        following = items[obj.last + 1] if obj.last + 1 < len(items) else None
+        entry = {
+            "key": _object_key(document, obj),
+            "kind": obj.kind,
+            "caption": obj.caption,
+            "section": _heading_before(items, obj.first),
+            "text_before": previous.text.strip()[:400] if _is_plain_text(previous) else "",
+            "reference_sentence": _reference_sentence(obj, variants[obj.first]) if _reference_state(items, obj) != "ok" else "",
+            "next_heading": following.text.strip()[:120] if _is_heading(following) else "",
+            "text": "",
+        }
+        if obj.table is not None:
+            rows = [[" ".join(cell.text.split())[:cell_chars] for cell in row.cells] for row in obj.table.rows]
+            entry["rows"] = rows[:max_rows]
+            entry["total_rows"] = len(rows)
+        needed.append(entry)
+    return needed
+
+
+def figure_image(document, key: str) -> tuple[str, bytes] | None:
+    """Файл рисунка по ключу абзаца, если ключ относится к рисунку."""
+    items = _content_items(document)
+    for obj in _find_objects(items):
+        if obj.kind == "figure" and _object_key(document, obj) == key:
+            blob = _image_blob(document, obj.picture)
+            return (f"{hashlib.sha1(blob).hexdigest()[:10]}.png", blob) if blob else None
     return None
 
 
-def _sentence_paragraph(reference: Paragraph, text: str) -> Paragraph:
-    clone = copy.deepcopy(reference._p)
-    for child in list(clone):
-        if child.tag != qn("w:pPr"):
-            clone.remove(child)
-    paragraph = Paragraph(clone, reference._parent)
+def _new_paragraph(document, text: str, space_before: Pt = Pt(0)) -> Paragraph:
+    paragraph = Paragraph(OxmlElement("w:p"), document._body)
     run = paragraph.add_run(text)
-    template = reference.runs[0]._r.find(qn("w:rPr")) if reference.runs else None
-    if template is not None:
-        run._r.insert(0, copy.deepcopy(template))
-    paragraph.paragraph_format.space_before = BLANK_LINE
+    run.font.name = standard.FONT
+    run.font.size = Pt(standard.FONT_SIZE_PT)
+    fmt = paragraph.paragraph_format
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    fmt.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+    fmt.left_indent = Cm(0)
+    fmt.right_indent = Cm(0)
+    fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
+    fmt.space_before = space_before
+    fmt.space_after = Pt(0)
     return paragraph
 
 
-def fix_text_after_objects(document) -> int:
-    """Добавляет предложение-ссылку на таблицу или рисунок там, где сразу после них стоит заголовок, подпись или конец документа."""
-    items = list(_paragraphs_and_tables(document))
+def _element(item):
+    return item._tbl if isinstance(item, Table) else item._p
+
+
+def _add_reference_before_colon(paragraph: Paragraph, obj: _Object) -> None:
+    runs = [run for run in paragraph.runs if run.text]
+    last = runs[-1]
+    word = "таблица" if obj.kind == "table" else "рисунок"
+    last.text = f"{last.text.rstrip()[:-1].rstrip()} ({word} {obj.number}):"
+
+
+def fix_text_around_objects(document, options: FixOptions = FixOptions()) -> int:
+    """Перед таблицей или рисунком ставится текст со ссылкой на них, после них абзац текста по данным автора (options.notes)."""
+    items = _content_items(document)
+    objects = _find_objects(items)
+    variants = _variants(objects)
     added = 0
-    for index, sentence in reversed(_objects_needing_text(items)):
-        reference = _reference_paragraph(items, index)
-        if reference is None:
-            continue
-        element = items[index]._tbl if isinstance(items[index], Table) else items[index]._p
-        element.addnext(_sentence_paragraph(reference, sentence)._p)
-        added += 1
+    for obj in objects:
+        state = _reference_state(items, obj)
+        if state == "colon":
+            _add_reference_before_colon(items[obj.first - 1], obj)
+        elif state == "missing":
+            sentence = _reference_sentence(obj, variants[obj.first])
+            previous = items[obj.first - 1] if obj.first else None
+            gap = Pt(0) if previous is None or _is_plain_text(previous) or _is_heading(previous) else BLANK_LINE
+            if sentence:
+                _element(items[obj.first]).addprevious(_new_paragraph(document, sentence, gap)._p)
+                added += 1
+        if not _has_text_after(items, obj):
+            note = options.notes.get(_object_key(document, obj), "").strip()
+            if note:
+                _element(items[obj.last]).addnext(_new_paragraph(document, note)._p)
+                added += 1
     return added
 
 
@@ -369,6 +536,8 @@ def _style_entry(paragraph: Paragraph) -> None:
         run.italic = False
     paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+    paragraph.paragraph_format.left_indent = Cm(0)
+    paragraph.paragraph_format.right_indent = Cm(0)
 
 
 def _rebuild_entries(entries: list[Paragraph], options: FixOptions) -> dict[int, tuple[int, ...]]:
@@ -455,14 +624,131 @@ def fix_sources_list(document, options: FixOptions = FixOptions()) -> int:
     return total
 
 
+LATIN_SPAN_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:(?:://|[._\-/'’+&#]+)[A-Za-z0-9]+| [A-Za-z][A-Za-z0-9]*)*")
+LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+TEXT_ONLY_CHILDREN = {qn("w:rPr"), qn("w:t")}
+
+
+def _is_italic(paragraph: Paragraph, run: Run) -> bool:
+    if run.italic is not None:
+        return run.italic
+    if run.style is not None and run.style.font.italic is not None:
+        return run.style.font.italic
+    style = paragraph.style
+    while style is not None:
+        if style.font.italic is not None:
+            return style.font.italic
+        style = style.base_style
+    return False
+
+
+def _latin_segments(text: str) -> list[tuple[str, bool]]:
+    """Делит текст на латинские фрагменты (курсив) и всё остальное: кириллицу, цифры, знаки препинания, пробелы (прямой шрифт)."""
+    segments, position = [], 0
+    for match in LATIN_SPAN_RE.finditer(text):
+        if match.start() > position:
+            segments.append((text[position : match.start()], False))
+        segments.append((match.group(), True))
+        position = match.end()
+    if position < len(text):
+        segments.append((text[position:], False))
+    return segments
+
+
+def _split_run_by_script(paragraph: Paragraph, run: Run) -> int:
+    segments = _latin_segments(run.text)
+    if all(is_latin for _, is_latin in segments):
+        return 0
+    if not LATIN_LETTER_RE.search(run.text):
+        run.italic = False
+        return 1
+    if {child.tag for child in run._r} - TEXT_ONLY_CHILDREN:
+        return 0
+    for text, is_latin in segments:
+        clone = copy.deepcopy(run._r)
+        run._r.addprevious(clone)
+        piece = Run(clone, paragraph)
+        piece.text = text
+        piece.italic = is_latin
+    run._r.getparent().remove(run._r)
+    return 1
+
+
+def _document_paragraphs(document) -> list[Paragraph]:
+    parents = [document.element.body] + [part._element for section in document.sections for part in (section.header, section.footer)]
+    return [Paragraph(element, document) for parent in parents for element in parent.iter(qn("w:p"))]
+
+
+def fix_italics(document) -> int:
+    """Курсивом набирается только латиница: кириллица, цифры, знаки препинания и пробелы остаются прямыми, в том числе рядом с латиницей."""
+    fixed = 0
+    for paragraph in _document_paragraphs(document):
+        for element in paragraph._p.xpath(".//w:r"):
+            run = Run(element, paragraph)
+            if run.text and _is_italic(paragraph, run):
+                fixed += _split_run_by_script(paragraph, run)
+    return fixed
+
+
+def count_non_latin_italic(document) -> int:
+    """Фрагменты курсивом, в которых есть что-то кроме латиницы: кириллица, цифры, знаки препинания."""
+    count = 0
+    for paragraph in _document_paragraphs(document):
+        for element in paragraph._p.xpath(".//w:r"):
+            run = Run(element, paragraph)
+            if run.text.strip() and _is_italic(paragraph, run) and not all(is_latin for _, is_latin in _latin_segments(run.text.strip())):
+                count += 1
+    return count
+
+
+SKIPPED_STYLE_PREFIXES = ("Heading", "toc", "TOC", "Title")
+
+
+def _is_centered(paragraph: Paragraph) -> bool:
+    value = paragraph.alignment
+    style = paragraph.style
+    while value is None and style is not None:
+        value = style.paragraph_format.alignment
+        style = style.base_style
+    return value == WD_ALIGN_PARAGRAPH.CENTER
+
+
+def fix_body_indents(document) -> int:
+    """Основной текст, списки и записи источников: абзацный отступ 1,25 см, слева и справа без отступов, по ширине.
+
+    Титульный лист, заголовки, содержание, подписи, рисунки и текст по центру не меняются.
+    """
+    fixed = 0
+    started = False
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        name = paragraph.style.name
+        started = started or (name.startswith("Heading") and bool(text))
+        if not started or not text or name.startswith(SKIPPED_STYLE_PREFIXES) or _has_picture(paragraph) or _is_caption(paragraph):
+            continue
+        if CONTINUATION_RE.match(text) or _is_centered(paragraph):
+            continue
+        fmt = paragraph.paragraph_format
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        fmt.left_indent = Cm(0)
+        fmt.right_indent = Cm(0)
+        fmt.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+        fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+        fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
+        fixed += 1
+    return fixed
+
+
 def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
     return (
         fix_title_date(document)
         + remove_filler_paragraphs(document)
         + fix_section_headings(document)
         + fix_subsection_spacing(document)
+        + fix_text_around_objects(document, options)
         + fix_objects(document)
-        + fix_text_after_objects(document)
         + fix_appendix_headings(document)
         + fix_sources_list(document, options)
+        + fix_italics(document)
+        + fix_body_indents(document)
     )

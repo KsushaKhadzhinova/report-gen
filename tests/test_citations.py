@@ -26,8 +26,8 @@ def test_citation_with_a_page_tail_keeps_the_tail_for_a_single_source():
 def test_domain_entry_is_split_into_entries_with_urls():
     entry = "Страницы сайтов конкурентов: plantuml.com, mermaid.js.org [Электронный ресурс]. – Дата доступа: 01.10.2026."
     assert split_domain_entry(entry) == [
-        "plantuml.com : [сайт]. – URL: https://plantuml.com (дата обращения: 01.10.2026).",
-        "mermaid.js.org : [сайт]. – URL: https://mermaid.js.org (дата обращения: 01.10.2026).",
+        "plantuml.com [Электронный ресурс]. – Режим доступа: https://plantuml.com. – Дата доступа: 01.10.2026.",
+        "mermaid.js.org [Электронный ресурс]. – Режим доступа: https://mermaid.js.org. – Дата доступа: 01.10.2026.",
     ]
     assert split_domain_entry("Иванов, И. И. Основы анализа.") is None
 
@@ -53,7 +53,7 @@ def test_sources_are_rebuilt_and_in_text_citations_follow(tmp_path):
     assert body == "Текст со ссылками на методики и на данные [1–3]."
     entries = [t for t in texts if t[:2] in ("1 ", "2 ", "3 ")]
     assert len(entries) == 3
-    assert "(дата обращения: 30.09.2026)" in entries[0]
+    assert entries[0] == "1 Similarweb Pro [Электронный ресурс] : обзор. – Режим доступа: https://pro.similarweb.com. – Дата доступа: 30.09.2026."
     assert entries[1].startswith("2 plantuml.com") and entries[2].startswith("3 mermaid.ai")
 
 
