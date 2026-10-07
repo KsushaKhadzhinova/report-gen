@@ -213,7 +213,7 @@ class TexRenderer:
         handlers = {
             Kind.HEADING: lambda: _heading(block),
             Kind.PARAGRAPH: lambda: inline(block.text) + "\n",
-            Kind.LIST: lambda: "".join(inline(line) + "\n" for line in standard.list_items(block.items)),
+            Kind.LIST: lambda: "".join(inline(line) + "\n\n" for line in standard.list_items(block.items)),
             Kind.TABLE: lambda: _table(block),
         }
         return handlers[block.kind]()
