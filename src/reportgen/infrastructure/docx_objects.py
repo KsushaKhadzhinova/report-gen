@@ -74,6 +74,14 @@ def _set_text(paragraph, text: str) -> None:
         paragraph.add_run(text)
 
 
+def _capitalize_paragraph(paragraph) -> None:
+    """Делает первую букву первого непустого символа заглавной."""
+    for run in paragraph.runs:
+        if run.text:
+            run.text = run.text[0].upper() + run.text[1:]
+            return
+
+
 def fix_title_date(document) -> int:
     """На титульном листе «Минск 2026» без месяца."""
     fixed = 0
@@ -146,9 +154,11 @@ def _fix_table_cell_paragraphs(table: Table) -> None:
                 fmt.space_after = Pt(0)
                 if paragraph.alignment == WD_ALIGN_PARAGRAPH.JUSTIFY:
                     paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                _capitalize_paragraph(paragraph)
                 for run in paragraph.runs:
                     run.font.name = standard.FONT
                     run.font.size = Pt(TABLE_FONT_PT)
+                    run.bold = False
 
 
 def _has_merged_cells(table: Table) -> bool:
