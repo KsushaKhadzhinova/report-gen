@@ -50,12 +50,23 @@ def _is_caption(paragraph) -> bool:
     return CAPTION_RE.match(paragraph.text.strip()) is not None
 
 
+def _is_listing(paragraph) -> bool:
+    return paragraph.style.name == standard.LISTING_STYLE
+
+
 def _is_body(paragraph) -> bool:
     long_enough = len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS
     centered = _alignment(paragraph) == WD_ALIGN_PARAGRAPH.CENTER
     name = paragraph.style.name.lower()
     contents_entry = name.startswith(("toc", "оглавление"))
-    return long_enough and not centered and not name.startswith("heading") and not contents_entry and not _is_caption(paragraph)
+    return (
+        long_enough
+        and not centered
+        and not name.startswith("heading")
+        and not contents_entry
+        and not _is_caption(paragraph)
+        and not _is_listing(paragraph)
+    )
 
 
 def _has_foreign_font(paragraph) -> bool:
@@ -261,7 +272,7 @@ class DocxFormatService:
 
     @staticmethod
     def _fix_paragraph(paragraph) -> int:
-        if paragraph.style.name.startswith("Heading") or not paragraph.text.strip():
+        if paragraph.style.name.startswith("Heading") or not paragraph.text.strip() or _is_listing(paragraph):
             return 0
         for run in paragraph.runs:
             run.font.name = standard.FONT

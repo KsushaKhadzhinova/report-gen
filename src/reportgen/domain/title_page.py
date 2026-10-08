@@ -32,9 +32,35 @@ def _blank(count: int = 1) -> list[TitleLine]:
     return [TitleLine(BLANK)] * count
 
 
+def _lab_title_page(meta: dict, value: dict) -> list[TitleLine]:
+    """Титульный лист отчёта по лабораторной работе: без темы, подписи «Выполнил» и «Проверил»."""
+    lines = [TitleLine(CENTER, meta.get("ministry") or DEFAULT_MINISTRY), *_blank()]
+    lines.append(TitleLine(CENTER, "Учреждение образования"))
+    lines += [TitleLine(CENTER, line) for line in (meta.get("university_lines") or DEFAULT_UNIVERSITY_LINES)]
+    lines += _blank()
+    lines += [TitleLine(FIELD, value["faculty"], "Факультет"), *_blank()]
+    lines += [TitleLine(FIELD, value["department"], "Кафедра")]
+    lines += _blank(BLANKS_BEFORE_SIGNATURES)
+    lines.append(TitleLine(CENTER, meta.get("document_type") or "ОТЧЁТ"))
+    lines.append(TitleLine(CENTER, meta.get("work_kind") or "по лабораторной работе"))
+    if meta.get("discipline"):
+        lines.append(TitleLine(CENTER, "по дисциплине"))
+        lines.append(TitleLine(CENTER, f"«{meta['discipline']}»"))
+    lines += _blank(BLANKS_BEFORE_SIGNATURES + 1)
+    lines.append(TitleLine(SIGNATURE, meta.get("group") or "", meta.get("student_label") or "Выполнил:"))
+    lines.append(TitleLine(SIGNATURE, value["student"], ""))
+    lines += _blank(2)
+    lines.append(TitleLine(SIGNATURE, value["supervisor"], meta.get("supervisor_label") or "Проверил:"))
+    lines += _blank(BLANKS_BEFORE_FOOTER - 2)
+    lines.append(TitleLine(CENTER, f"{meta.get('city') or DEFAULT_CITY} {meta.get('year') or ''}".strip()))
+    return lines
+
+
 def build_title_page(meta: dict) -> list[TitleLine]:
     """Состав титульного листа по образцу пояснительных записок БГУИР; личные поля при отсутствии данных заменяются заглушками."""
     value = {key: meta.get(key) or PLACEHOLDERS[key] for key in PLACEHOLDERS}
+    if meta.get("title_style") == "lab":
+        return _lab_title_page(meta, value)
     lines = [TitleLine(CENTER, meta.get("ministry") or DEFAULT_MINISTRY), *_blank()]
     lines.append(TitleLine(CENTER, "Учреждение образования"))
     lines += [TitleLine(CENTER, line) for line in (meta.get("university_lines") or DEFAULT_UNIVERSITY_LINES)]

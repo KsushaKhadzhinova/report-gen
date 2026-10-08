@@ -737,6 +737,8 @@ def fix_italics(document) -> int:
     """Курсивом набирается вся латиница и только она: кириллица, цифры, знаки препинания и пробелы остаются прямыми, в том числе рядом с латиницей."""
     fixed = 0
     for paragraph in _document_paragraphs(document):
+        if paragraph.style.name == standard.LISTING_STYLE:
+            continue
         for element in paragraph._p.xpath(".//w:r"):
             run = Run(element, paragraph)
             if run.text.strip():
@@ -772,6 +774,8 @@ def count_wrong_italics(document) -> int:
     """Фрагменты, в которых курсив не совпадает с латиницей: латиница прямым шрифтом или кириллица, цифры и знаки курсивом."""
     count = 0
     for paragraph in _document_paragraphs(document):
+        if paragraph.style.name == standard.LISTING_STYLE:
+            continue
         for element in paragraph._p.xpath(".//w:r"):
             run = Run(element, paragraph)
             if not run.text.strip():
@@ -782,7 +786,7 @@ def count_wrong_italics(document) -> int:
     return count
 
 
-SKIPPED_STYLE_PREFIXES = ("Heading", "toc", "TOC", "Title")
+SKIPPED_STYLE_PREFIXES = ("Heading", "toc", "TOC", "Title", standard.LISTING_STYLE)
 
 
 def _is_centered(paragraph: Paragraph) -> bool:

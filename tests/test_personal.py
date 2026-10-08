@@ -67,3 +67,14 @@ def test_encrypted_export_hides_data_and_needs_the_password(tmp_path: Path):
 def test_short_export_password_is_refused(tmp_path: Path):
     with pytest.raises(ValueError):
         export_encrypted(PROFILE, "коротко", tmp_path / "profile.enc")
+
+
+def test_lab_title_page_has_no_topic_and_uses_lab_labels():
+    meta = {"title_style": "lab", "student": "К. А. Хаджинова", "supervisor": "Ю. О. Герман", "group": "ст. гр. 320604",
+            "discipline": "Современные системы программирования", "student_label": "Выполнила:", "supervisor_label": "Проверила:"}
+    lines = build_title_page(meta)
+    texts = [line.text for line in lines]
+    labels = [line.label for line in lines]
+    assert "на тему" not in texts
+    assert "«Современные системы программирования»" in texts
+    assert "Выполнила:" in labels and "Проверила:" in labels

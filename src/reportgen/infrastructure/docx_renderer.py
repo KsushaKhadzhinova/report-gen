@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING, WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
@@ -47,6 +48,24 @@ def _configure_styles(doc: Document) -> None:
         style.paragraph_format.space_before = Pt(0)
         style.paragraph_format.space_after = Pt(standard.LINE_SPACING_PT)
         style.paragraph_format.keep_with_next = True
+
+
+def _configure_listing_style(doc: Document) -> None:
+    """Листинги кода: Times New Roman 12 пт курсивом, по левому краю, без отступов, одинарный интервал."""
+    style = doc.styles.add_style(standard.LISTING_STYLE, WD_STYLE_TYPE.PARAGRAPH)
+    style.base_style = doc.styles["Normal"]
+    style.font.name = standard.FONT
+    style.font.size = Pt(standard.LISTING_FONT_SIZE_PT)
+    style.font.italic = True
+    style.element.get_or_add_rPr().rFonts.set(qn("w:eastAsia"), standard.FONT)
+    fmt = style.paragraph_format
+    fmt.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    fmt.first_line_indent = Cm(0)
+    fmt.left_indent = Cm(0)
+    fmt.right_indent = Cm(0)
+    fmt.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
 
 
 def _configure_page(doc: Document) -> None:
@@ -199,11 +218,7 @@ def _code(doc: Document, block: Block) -> None:
         caption.paragraph_format.keep_with_next = True
         caption.add_run(standard.listing_caption(block.number, block.caption))
     for line in block.text.splitlines() or [""]:
-        paragraph = doc.add_paragraph()
-        paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
-        run = paragraph.add_run(line)
-        run.font.name = "Courier New"
-        run.font.size = Pt(11)
+        doc.add_paragraph(line, style=standard.LISTING_STYLE)
     _blank(doc)
 
 
@@ -250,6 +265,7 @@ class DocxRenderer:
     def render(self, blocks: list[Block], meta: dict, base_dir: Path, output: Path) -> Path:
         doc = Document()
         _configure_styles(doc)
+        _configure_listing_style(doc)
         _configure_page(doc)
         _page_number_footer(doc)
         if meta.get("title_page", True):
