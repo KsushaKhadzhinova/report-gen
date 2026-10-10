@@ -75,6 +75,7 @@ def _configure_page(doc: Document) -> None:
     section.right_margin = Mm(standard.MARGIN_RIGHT_MM)
     section.top_margin = Mm(standard.MARGIN_TOP_MM)
     section.bottom_margin = Mm(standard.MARGIN_BOTTOM_MM)
+    section.footer_distance = Mm(standard.FOOTER_DISTANCE_MM)
 
 
 def _field(paragraph, instruction: str) -> None:

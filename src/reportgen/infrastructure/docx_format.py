@@ -140,6 +140,7 @@ def _citation_issues(document, name: str) -> list[Issue]:
 def _margin_issues(document, name: str) -> list[Issue]:
     section = document.sections[0]
     expected = {
+        "расстояние номера страницы до нижнего края листа": (section.footer_distance, standard.FOOTER_DISTANCE_MM),
         "левое поле": (section.left_margin, standard.MARGIN_LEFT_MM),
         "правое поле": (section.right_margin, standard.MARGIN_RIGHT_MM),
         "верхнее поле": (section.top_margin, standard.MARGIN_TOP_MM),
@@ -262,6 +263,7 @@ class DocxFormatService:
             section.right_margin = Mm(standard.MARGIN_RIGHT_MM)
             section.top_margin = Mm(standard.MARGIN_TOP_MM)
             section.bottom_margin = Mm(standard.MARGIN_BOTTOM_MM)
+            section.footer_distance = Mm(standard.FOOTER_DISTANCE_MM)
 
     @staticmethod
     def _fix_normal_style(document) -> None:

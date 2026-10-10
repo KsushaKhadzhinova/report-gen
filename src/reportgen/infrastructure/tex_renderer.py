@@ -28,7 +28,7 @@ PREAMBLE = r"""\documentclass[a4paper,14pt]{extarticle}
 \IfFontExistsTF{Times New Roman}{\setmainfont{Times New Roman}}{\setmainfont{Liberation Serif}}
 \IfFontExistsTF{Courier New}{\setmonofont{Courier New}}{\setmonofont{Liberation Mono}}
 \usepackage[russian]{babel}
-\usepackage[a4paper,left=%(left)smm,right=%(right)smm,top=%(top)smm,bottom=%(bottom)smm]{geometry}
+\usepackage[a4paper,left=%(left)smm,right=%(right)smm,top=%(top)smm,bottom=%(bottom)smm,footskip=%(footskip)smm]{geometry}
 \usepackage{graphicx}
 \usepackage{longtable}
 \usepackage{array}
@@ -174,6 +174,7 @@ def _preamble() -> str:
         "right": standard.MARGIN_RIGHT_MM,
         "top": standard.MARGIN_TOP_MM,
         "bottom": standard.MARGIN_BOTTOM_MM,
+        "footskip": standard.MARGIN_BOTTOM_MM - standard.FOOTER_DISTANCE_MM,
         "indent": standard.PARAGRAPH_INDENT_CM,
     }
 

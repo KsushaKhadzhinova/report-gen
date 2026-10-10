@@ -162,7 +162,8 @@ def align_headings(document) -> int:
             changed += 1
         elif paragraph.style.name.startswith("Heading") and paragraph.alignment != WD_ALIGN_PARAGRAPH.CENTER:
             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
-            paragraph.paragraph_format.first_line_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+            paragraph.paragraph_format.left_indent = Cm(standard.PARAGRAPH_INDENT_CM)
+            paragraph.paragraph_format.first_line_indent = Cm(0)
             changed += 1
         elif is_bold_question:
             paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -251,7 +252,8 @@ def _contents_style(document) -> None:
     fmt.left_indent = Cm(0)
     fmt.space_before = Pt(0)
     fmt.space_after = Pt(0)
-    fmt.line_spacing_rule = WD_LINE_SPACING.SINGLE
+    fmt.line_spacing_rule = WD_LINE_SPACING.EXACTLY
+    fmt.line_spacing = Pt(standard.LINE_SPACING_PT)
     style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
 
 

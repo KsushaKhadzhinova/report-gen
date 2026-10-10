@@ -95,3 +95,19 @@ def test_numbers_below_ten_without_units_must_be_words():
     assert not has_small_digit_numerals("Запрос выполнен за 5 секунд")
     assert not has_small_digit_numerals("Версия 2 и таблица 4")
     assert not has_small_digit_numerals("Создано пять страниц и 20 листов")
+
+
+def test_page_number_distance_from_the_bottom_edge_is_ten_millimetres(tmp_path: Path):
+    from docx.shared import Mm
+
+    from reportgen.infrastructure.docx_format import DocxFormatService
+
+    source = tmp_path / "footer.docx"
+    document = Document()
+    document.sections[0].footer_distance = Mm(12.7)
+    document.add_paragraph("Текст")
+    document.save(source)
+    assert any("расстояние номера страницы" in issue.message for issue in DocxFormatService().audit(source))
+    fixed = tmp_path / "footer_fixed.docx"
+    DocxFormatService().fix(source, fixed)
+    assert round(Document(fixed).sections[0].footer_distance.mm) == 10
