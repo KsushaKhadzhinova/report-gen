@@ -27,6 +27,7 @@ from reportgen.infrastructure.file_stores import FileStyleStore
 from reportgen.infrastructure.latex_compiler import LatexError, XelatexCompiler
 from reportgen.infrastructure.llm_client import LLMError, OpenAICompatibleModel
 from reportgen.infrastructure.outline_reader import read_outline
+from reportgen.infrastructure.pdf_audit import page_fill_issues
 from reportgen.infrastructure.profile_vault import EXPORT_FILE, LocalProfileStore, export_encrypted, import_encrypted
 from reportgen.infrastructure.prompt_library import load_prompt_catalog
 from reportgen.infrastructure.readers import DocumentProseSource, read_paragraphs
@@ -255,7 +256,9 @@ def cmd_from_sample(args) -> int:
 
 
 def cmd_lint(args) -> int:
-    if args.docx:
+    if args.pdf:
+        issues = page_fill_issues(Path(args.pdf))
+    elif args.docx:
         issues = DocxFormatService().audit(Path(args.docx))
     else:
         issues = lint_report(FileProjectRepository(Path(args.project)))
@@ -402,6 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     lint = add("lint", cmd_lint, "Проверить соответствие СТП")
     lint.add_argument("project", nargs="?")
     lint.add_argument("--docx")
+    lint.add_argument("--pdf", help="проверить заполнение страниц готового PDF: не менее 11 строк текста")
     questions = add("questions", cmd_questions, "Вопросы автору по меткам [УТОЧНИТЬ]")
     questions.add_argument("project")
     overlap = add("overlap", cmd_overlap, "Найти совпадения с эталонными работами")

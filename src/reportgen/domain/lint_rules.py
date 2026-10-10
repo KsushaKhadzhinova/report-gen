@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
+from reportgen.domain.reviewer_rules import STRAIGHT_QUOTES_RE, has_filler_words, has_parenthesis_reference
 
 FIRST_PERSON_RE = re.compile(r"(?<![а-яё])(я|мы|наш\w*|мой|моя)(?![а-яё])", re.IGNORECASE)
 PLACEHOLDER_RE = re.compile(r"TODO|\[нет файла|\[УТОЧНИТЬ|\?\?|lorem ipsum", re.IGNORECASE)
@@ -57,6 +58,10 @@ def _check_heading(block: Block, previous_level: int) -> list[Issue]:
     issues = []
     if previous_level and block.level > previous_level + 1:
         issues.append(_error(block.source, f"Пропущен уровень заголовка перед «{block.text}»"))
+    if block.level == 1 and block.text.strip().lower() == "выводы":
+        issues.append(_warning(block.source, "Раздел «Выводы» называется «Заключение»"))
+    if block.level == 1 and not block.numbered and block.text.strip().lower().startswith("цель работы"):
+        issues.append(_warning(block.source, "Заголовок «Цель работы» нумеруется: «1 Цель работы»"))
     if block.level == 1 and block.numbered and not block.appendix and block.text.upper() in standard.UNNUMBERED_HEADINGS:
         issues.append(_error(block.source, f"Заголовок «{block.text}» не нумеруется: добавьте {{-}}"))
     return issues
@@ -74,6 +79,12 @@ def _check_paragraph(block: Block) -> list[Issue]:
         issues.append(_warning(block.source, f"Перед числом с единицей не ставят «в»: {_excerpt(block.text)}"))
     if PERIOD_BEFORE_CITATION_RE.search(block.text):
         issues.append(_warning(block.source, f"Точку ставят после скобки со ссылкой: {_excerpt(block.text)}"))
+    if STRAIGHT_QUOTES_RE.search(block.text):
+        issues.append(_warning(block.source, f"Прямые кавычки заменяют на «…»: {_excerpt(block.text)}"))
+    if has_parenthesis_reference(block.text):
+        issues.append(_warning(block.source, f"Ссылку на рисунок или таблицу пишут словами, без «см.» и скобок: {_excerpt(block.text)}"))
+    if has_filler_words(block.text):
+        issues.append(_warning(block.source, f"Слова-паразиты («также», «были»): {_excerpt(block.text)}"))
     if LONG_DASH in block.text:
         issues.append(_warning(block.source, f"Длинное тире «—», в тексте используется короткое «–»: {_excerpt(block.text)}"))
     return issues

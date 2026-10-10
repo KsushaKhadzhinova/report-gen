@@ -49,7 +49,7 @@ def fixed(tmp_path: Path) -> Document:
 
 
 def find(document, fragment: str):
-    return next(p for p in document.paragraphs if fragment in p.text)
+    return next(p for p in document.paragraphs if fragment in p.text.replace(" ", " "))
 
 
 def test_title_has_no_month(tmp_path: Path):

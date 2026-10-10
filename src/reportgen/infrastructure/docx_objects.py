@@ -26,6 +26,7 @@ from reportgen.domain.object_sentences import (
     table_reference_sentence,
 )
 from reportgen.domain.sources import vak_entries
+from reportgen.infrastructure.docx_typography import fix_hyperlink_look, fix_quotes_and_reference_spaces
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
 TABLE_FONT_PT = 12
@@ -839,4 +840,6 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
         + fix_numbered_lists(document)
         + fix_italics(document)
         + fix_body_indents(document)
+        + fix_quotes_and_reference_spaces(document)
+        + fix_hyperlink_look(document)
     )

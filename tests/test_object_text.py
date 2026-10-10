@@ -39,7 +39,7 @@ def build(tmp_path: Path, text_before: str = BODY, with_text_after: bool = False
 def fixed_texts(source: Path, tmp_path: Path, options: FixOptions = FixOptions()) -> list[str]:
     output = tmp_path / "fixed.docx"
     DocxFormatService().fix(source, output, options)
-    return [p.text for p in Document(output).paragraphs]
+    return [p.text.replace(" ", " ") for p in Document(output).paragraphs]
 
 
 def test_table_without_a_reference_before_it_gets_a_sentence_before_the_caption(tmp_path: Path):
