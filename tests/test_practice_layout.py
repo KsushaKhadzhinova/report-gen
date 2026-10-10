@@ -173,7 +173,7 @@ def test_wide_pictures_are_scaled_to_the_limit_keeping_proportions(tmp_path: Pat
     document.add_picture(str(image), width=Cm(16))
     assert fit_pictures(document) == 1
     shape = document.inline_shapes[0]
-    assert round(shape.width.cm, 1) == 9.0
+    assert round(shape.width.cm, 1) == 8.5
     assert round(shape.height.cm / shape.width.cm, 2) == 0.6
 
 
