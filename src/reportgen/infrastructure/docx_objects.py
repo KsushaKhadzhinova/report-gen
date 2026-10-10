@@ -26,6 +26,7 @@ from reportgen.domain.object_sentences import (
     table_reference_sentence,
 )
 from reportgen.domain.sources import vak_entries
+from reportgen.infrastructure.docx_practice import apply_practice_layout
 from reportgen.infrastructure.docx_typography import fix_hyperlink_look, fix_quotes_and_reference_spaces
 
 BLANK_LINE = Pt(standard.LINE_SPACING_PT)
@@ -842,4 +843,5 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
         + fix_body_indents(document)
         + fix_quotes_and_reference_spaces(document)
         + fix_hyperlink_look(document)
+        + (apply_practice_layout(document) if options.practice else 0)
     )

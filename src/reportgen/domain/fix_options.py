@@ -10,4 +10,5 @@ class FixOptions:
     drop_sources: tuple[str, ...] = ()
     citation_offset: int = 0
     drop_citations: tuple[int, ...] = ()
+    practice: bool = False
     notes: dict[str, str] = field(default_factory=dict, hash=False, compare=False)

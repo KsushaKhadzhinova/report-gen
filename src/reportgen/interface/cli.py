@@ -318,7 +318,7 @@ def cmd_fix(args) -> int:
         source,
         output,
         remarks,
-        FixOptions(tuple(args.drop_source), args.citation_offset, tuple(args.drop_citation), _read_notes(args.notes)),
+        FixOptions(tuple(args.drop_source), args.citation_offset, tuple(args.drop_citation), args.practice, _read_notes(args.notes)),
     )
     if result.review:
         output.with_suffix(".review.md").write_text(result.review, encoding="utf-8")
@@ -420,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--citation-offset", type=int, default=0, help="на сколько номера ссылок в тексте больше позиции записи в списке (если часть списка отсутствует)")
     fix.add_argument("--drop-citation", type=int, action="append", default=[], help="номер ссылки, которую нужно убрать из текста (можно несколько раз)")
     fix.add_argument("--reference")
+    fix.add_argument("--practice", action="store_true", help="оформление отчёта по практическому занятию: разделы с новой страницы, содержание, пункты через тире, листинги в приложения, рамки у скриншотов")
     fix.add_argument("--notes", action="append", default=[], help="JSON с абзацами, которые ставятся после таблиц и рисунков (можно несколько раз)")
     notes = add("notes", cmd_notes, "Выгрузить таблицы и рисунки, после которых нужен абзац текста")
     notes.add_argument("file")
