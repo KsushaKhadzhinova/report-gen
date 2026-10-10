@@ -1,6 +1,6 @@
 """Пакетная подготовка отчётов: исправление оформления, вёрстка в Word, проверка.
 
-Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата> [--force] [--only ЛР4,ЛР5] [--notes notes.json]
+Запуск: python scripts/finalize_reports.py <папка с исходными DOCX> <папка результата> [--force] [--only ЛР4,ЛР5] [--notes notes.json] [--practice]
 Исходные файлы не изменяются; для каждого отчёта создаётся подпапка с DOCX и PDF.
 Уже готовые отчёты пропускаются, если не указан --force; сбой одного отчёта не останавливает остальные.
 """
@@ -30,12 +30,12 @@ def last_line(text: str, default: str) -> str:
     return lines[-1] if lines else default
 
 
-def finalize(source: Path, target_dir: Path, notes: list[str]) -> str:
+def finalize(source: Path, target_dir: Path, notes: list[str], practice: bool = False) -> str:
     target_dir.mkdir(parents=True, exist_ok=True)
     fixed = target_dir / "fixed.docx"
     final_docx = target_dir / f"{target_dir.name}.docx"
     final_pdf = target_dir / f"{target_dir.name}.pdf"
-    run(["report-gen", "fix", str(source), "--output", str(fixed), "--drop-source", DROP_SOURCE, *EXTRA_OPTIONS.get(target_dir.name, []), *[a for n in notes for a in ("--notes", n)]])
+    run(["report-gen", "fix", str(source), "--output", str(fixed), "--drop-source", DROP_SOURCE, *EXTRA_OPTIONS.get(target_dir.name, []), *(["--practice"] if practice else []), *[a for n in notes for a in ("--notes", n)]])
     word_report = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(SCRIPT), str(fixed), str(final_docx), str(final_pdf)])
     if not final_docx.is_file() or not final_pdf.is_file():
         return f"{source.name}: ОШИБКА Word | {last_line(word_report, 'нет ответа')[:300]}"
@@ -59,7 +59,8 @@ def main() -> int:
             print(f"{source.name}: уже готов, пропущен", flush=True)
             continue
         started = time.time()
-        print(f"{finalize(source, target, notes)} | {time.time() - started:.0f} с", flush=True)
+        result = finalize(source, target, notes, "--practice" in sys.argv)
+        print(f"{result} | {time.time() - started:.0f} с", flush=True)
     return 0
 
 

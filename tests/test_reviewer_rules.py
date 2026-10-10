@@ -4,7 +4,7 @@ from docx import Document
 
 from reportgen.domain.blocks import Block, Kind
 from reportgen.domain.lint_rules import check_blocks
-from reportgen.domain.reviewer_rules import NBSP, glue_reference_numbers, guillemets
+from reportgen.domain.reviewer_rules import NBSP, glue_reference_numbers, guillemets, has_small_digit_numerals
 from reportgen.infrastructure.docx_typography import fix_hyperlink_look, fix_quotes_and_reference_spaces
 from reportgen.infrastructure.pdf_audit import page_fill_issues
 
@@ -86,3 +86,12 @@ def test_pdf_pages_with_too_few_lines_are_reported(tmp_path: Path):
     pdf.close()
     reported = [issue.where for issue in page_fill_issues(path)]
     assert reported == ["short.pdf, страница 3"]
+
+
+def test_numbers_below_ten_without_units_must_be_words():
+    assert has_small_digit_numerals("Создано 5 страниц с формами")
+    assert has_small_digit_numerals("Реализовано 3 функции")
+    assert not has_small_digit_numerals("На рисунке 3 показана форма")
+    assert not has_small_digit_numerals("Запрос выполнен за 5 секунд")
+    assert not has_small_digit_numerals("Версия 2 и таблица 4")
+    assert not has_small_digit_numerals("Создано пять страниц и 20 листов")

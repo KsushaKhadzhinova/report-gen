@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from reportgen.domain import enterprise_standard as standard
 from reportgen.domain.blocks import Block, Kind
-from reportgen.domain.reviewer_rules import STRAIGHT_QUOTES_RE, has_filler_words, has_parenthesis_reference
+from reportgen.domain.reviewer_rules import STRAIGHT_QUOTES_RE, has_filler_words, has_parenthesis_reference, has_small_digit_numerals
 
 FIRST_PERSON_RE = re.compile(r"(?<![а-яё])(я|мы|наш\w*|мой|моя)(?![а-яё])", re.IGNORECASE)
 PLACEHOLDER_RE = re.compile(r"TODO|\[нет файла|\[УТОЧНИТЬ|\?\?|lorem ipsum", re.IGNORECASE)
@@ -83,6 +83,8 @@ def _check_paragraph(block: Block) -> list[Issue]:
         issues.append(_warning(block.source, f"Прямые кавычки заменяют на «…»: {_excerpt(block.text)}"))
     if has_parenthesis_reference(block.text):
         issues.append(_warning(block.source, f"Ссылку на рисунок или таблицу пишут словами, без «см.» и скобок: {_excerpt(block.text)}"))
+    if has_small_digit_numerals(block.text):
+        issues.append(_warning(block.source, f"Числа от одного до девяти без единиц измерения пишутся словами: {_excerpt(block.text)}"))
     if has_filler_words(block.text):
         issues.append(_warning(block.source, f"Слова-паразиты («также», «были»): {_excerpt(block.text)}"))
     if LONG_DASH in block.text:

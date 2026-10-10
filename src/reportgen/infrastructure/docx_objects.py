@@ -95,13 +95,13 @@ def fix_title_date(document) -> int:
     return fixed
 
 
-def fix_section_headings(document) -> int:
-    """Заголовки разделов набираются прописными буквами и в тексте, и в содержании."""
+def fix_section_headings(document, uppercase_text: bool = True) -> int:
+    """Заголовки разделов набираются прописными буквами и в тексте, и в содержании (без uppercase_text только оформлением)."""
     fixed = 0
     for paragraph in document.paragraphs:
         if paragraph.style.name != "Heading 1" or not paragraph.text.strip():
             continue
-        if paragraph.text != paragraph.text.upper():
+        if uppercase_text and paragraph.text != paragraph.text.upper():
             _set_text(paragraph, paragraph.text.upper())
             fixed += 1
     return fixed
@@ -832,7 +832,7 @@ def fix_all_objects(document, options: FixOptions = FixOptions()) -> int:
     return (
         fix_title_date(document)
         + remove_filler_paragraphs(document)
-        + fix_section_headings(document)
+        + fix_section_headings(document, uppercase_text=not options.practice)
         + fix_subsection_spacing(document)
         + fix_text_around_objects(document, options)
         + fix_objects(document)
