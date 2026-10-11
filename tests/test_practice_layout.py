@@ -248,3 +248,44 @@ def test_text_after_a_listing_stays_in_the_body_when_subsections_are_removed(tmp
     order = texts(Document(output))
     appendix = next(i for i, t in enumerate(order) if t.startswith("Приложение А"))
     assert order.index("Результаты работы описаны в этом абзаце основного текста отчёта, он не относится к коду.") < appendix
+
+
+def test_wide_text_screenshots_keep_a_larger_width_than_interface_screens(tmp_path: Path):
+    from docx.shared import Cm
+    from PIL import Image
+
+    wide = tmp_path / "wide_card.png"
+    Image.new("RGB", (880, 300), (255, 255, 255)).save(wide)
+    screen = tmp_path / "screen.png"
+    Image.new("RGB", (1000, 600), (255, 255, 255)).save(screen)
+    document = Document()
+    document.add_picture(str(wide), width=Cm(16))
+    document.add_picture(str(screen), width=Cm(16))
+    assert fit_pictures(document) == 2
+    assert round(document.inline_shapes[0].width.cm, 1) == 13.0
+    assert round(document.inline_shapes[1].width.cm, 1) == 8.5
+
+
+def test_numbered_bold_question_without_question_mark_is_still_a_question():
+    document = Document()
+    document.add_heading("Ответы на контрольные вопросы", level=1)
+    document.add_paragraph("Ответ предыдущего вопроса.")
+    question = document.add_paragraph()
+    question.add_run("12. Приведите пример отмены таймера.").bold = True
+    assert space_questions(document) == 1
+
+
+def test_straight_quotes_inside_listing_code_are_kept():
+    from reportgen.infrastructure.docx_typography import fix_quotes_and_reference_spaces
+
+    document = Document()
+    document.add_paragraph("Текст с \"кавычками\" в абзаце.")
+    document.add_paragraph("Листинг 1 – Пример")
+    document.add_paragraph('return res.json({ error: "Требуются email и пароль" });')
+    document.add_heading("Заключение", level=1)
+    document.add_paragraph("Снова \"кавычки\".")
+    fix_quotes_and_reference_spaces(document)
+    texts = [p.text for p in document.paragraphs]
+    assert texts[0] == "Текст с «кавычками» в абзаце."
+    assert '"Требуются email и пароль"' in texts[2]
+    assert texts[4] == "Снова «кавычки»."

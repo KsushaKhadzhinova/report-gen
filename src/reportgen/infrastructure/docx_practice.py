@@ -28,6 +28,7 @@ CODE_FONT_PT = 12
 CODE_INDENT_CM = 1.25
 MAX_PICTURE_WIDTH_CM = 8.5
 TERMINAL_WIDTH_CM = 13.0
+WIDE_PICTURE_RATIO = 1.8
 TERMINAL_MARGIN_PX = 12
 TERMINAL_CONTENT_THRESHOLD = 40
 FRAME_WIDTH_EMU = 3175
@@ -151,11 +152,18 @@ def capital_section_headings(document) -> int:
     return sum(1 for paragraph in document.paragraphs if _is_heading(paragraph, 1))
 
 
+def _is_question(paragraph: Paragraph) -> bool:
+    """Контрольный вопрос: целиком полужирный абзац, который заканчивается знаком вопроса или начинается с номера."""
+    text = paragraph.text.strip()
+    numbered = re.match(r"^\d+\.\s", text) is not None
+    return (text.endswith("?") or numbered) and bool(paragraph.runs) and all(run.bold for run in paragraph.runs if run.text.strip())
+
+
 def align_headings(document) -> int:
     """Заголовки выравниваются влево с абзацным отступом (введение, заключение и приложения по центру); вопросы полужирным влево."""
     changed = 0
     for paragraph in document.paragraphs:
-        is_bold_question = paragraph.text.strip().endswith("?") and bool(paragraph.runs) and all(run.bold for run in paragraph.runs if run.text.strip())
+        is_bold_question = _is_question(paragraph)
         if _is_heading(paragraph, 1) and paragraph.text.strip().lower() in CENTERED_HEADINGS:
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             paragraph.paragraph_format.first_line_indent = Cm(0)
@@ -512,7 +520,7 @@ def space_questions(document) -> int:
     changed = 0
     previous_is_heading = True
     for paragraph in document.paragraphs:
-        is_question = paragraph.text.strip().endswith("?") and bool(paragraph.runs) and all(run.bold for run in paragraph.runs if run.text.strip())
+        is_question = _is_question(paragraph)
         if is_question and not previous_is_heading:
             paragraph.paragraph_format.space_before = Pt(QUESTION_GAP_PT)
             changed += 1
@@ -521,10 +529,10 @@ def space_questions(document) -> int:
 
 
 def fit_pictures(document) -> int:
-    """Рисунки не шире 12 см с сохранением пропорций: меньше пустых мест на страницах."""
+    """Экранные формы не шире 8,5 см; широкие текстовые снимки (запрос и ответ, консоль) до 13 см, чтобы строки читались."""
     changed = 0
-    limit = Cm(MAX_PICTURE_WIDTH_CM)
     for shape in document.inline_shapes:
+        limit = Cm(TERMINAL_WIDTH_CM if shape.width / shape.height >= WIDE_PICTURE_RATIO else MAX_PICTURE_WIDTH_CM)
         if shape.width > limit:
             ratio = limit / shape.width
             shape.height = int(shape.height * ratio)

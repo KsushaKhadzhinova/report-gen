@@ -2,7 +2,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
-from docx.enum.text import WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.shared import Pt
 
 from reportgen.domain.fix_options import FixOptions
@@ -195,3 +195,14 @@ def test_long_contents_entries_are_not_audited_as_body_paragraphs(tmp_path: Path
     document.save(path)
     messages = [issue.message for issue in DocxFormatService().audit(path)]
     assert not any("не по ширине" in m or "абзацным отступом" in m for m in messages)
+
+
+def test_long_bold_questions_are_not_audited_as_body_paragraphs(tmp_path: Path):
+    document = Document()
+    question = document.add_paragraph()
+    question.add_run("4. Где безопаснее хранить токен на клиенте, в localStorage или в защищенной cookie, и почему именно так?").bold = True
+    question.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    path = tmp_path / "question.docx"
+    document.save(path)
+    messages = [issue.message for issue in DocxFormatService().audit(path)]
+    assert not any("не по ширине" in m for m in messages)

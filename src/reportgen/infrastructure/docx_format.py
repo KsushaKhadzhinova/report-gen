@@ -54,6 +54,13 @@ def _is_listing(paragraph) -> bool:
     return paragraph.style.name == standard.LISTING_STYLE
 
 
+def _is_question(paragraph) -> bool:
+    """Контрольный вопрос: жирный абзац с вопросительным знаком в конце, он выравнивается по левому краю без отступа."""
+    text = paragraph.text.strip()
+    numbered = re.match(r"^\d+\.\s", text) is not None
+    return (text.endswith("?") or numbered) and bool(paragraph.runs) and all(run.bold for run in paragraph.runs if run.text.strip())
+
+
 def _is_body(paragraph) -> bool:
     long_enough = len(paragraph.text) >= MIN_BODY_PARAGRAPH_CHARS
     centered = _alignment(paragraph) == WD_ALIGN_PARAGRAPH.CENTER
@@ -66,6 +73,7 @@ def _is_body(paragraph) -> bool:
         and not contents_entry
         and not _is_caption(paragraph)
         and not _is_listing(paragraph)
+        and not _is_question(paragraph)
     )
 
 

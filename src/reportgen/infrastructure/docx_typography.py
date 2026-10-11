@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
@@ -39,7 +41,24 @@ def _glue_across_runs(paragraph: Paragraph) -> int:
 
 def fix_quotes_and_reference_spaces(document) -> int:
     """Кавычки «…» вместо "…", неразрывный пробел между словами «рисунок», «таблица» и номером."""
-    return sum(_fix_run_texts(p) + _glue_across_runs(p) for p in _all_paragraphs(document))
+    code = _listing_code_ids(document)
+    return sum(_fix_run_texts(p) + _glue_across_runs(p) for p in _all_paragraphs(document) if p._p not in code)
+
+
+def _listing_code_ids(document) -> set:
+    """Строки программного кода под подписью листинга: прямые кавычки в них остаются как есть."""
+    found: set = set()
+    inside = False
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if paragraph.style.name.startswith("Heading"):
+            inside = False
+        elif re.match(r"^Листинг\s+\d+\s*[–-]", text):
+            inside = True
+            continue
+        if inside or paragraph.style.name == "Listing":
+            found.add(paragraph._p)
+    return found
 
 
 def _plain_run_properties(run_element) -> None:
